@@ -1,14 +1,38 @@
-
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function AddRecipePage() {
+  const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState<any>(null);
+
+  // form state
   const [title, setTitle] = useState('');
   const [cuisine, setCuisine] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [instructions, setInstructions] = useState('');
   const [ingredients, setIngredients] = useState<string[]>(['']);
+
+  useEffect(() => {
+    let mounted = true;
+
+    // 1) get current session on load
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      setLoading(false);
+    });
+
+    // 2) listen for future sign-ins/outs
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s);
+    });
+
+    return () => {
+      mounted = false;
+      sub?.subscription?.unsubscribe();
+    };
+  }, []);
 
   async function submit() {
     const steps = instructions
@@ -17,7 +41,7 @@ export default function AddRecipePage() {
       .filter(Boolean)
       .map((body, i) => ({ step_number: i + 1, body }));
 
-    const { data, error } = await supabase.rpc('add_full_recipe', {
+    const { error } = await supabase.rpc('add_full_recipe', {
       p_title: title,
       p_cuisine: cuisine || null,
       p_photo_url: null,
@@ -38,6 +62,22 @@ export default function AddRecipePage() {
     setTitle(''); setCuisine(''); setSourceUrl(''); setInstructions(''); setIngredients(['']);
   }
 
+  // ------- UI states -------
+  if (loading) {
+    return <div style={{maxWidth:720, margin:'40px auto', padding:16}}>Loading…</div>;
+  }
+
+  if (!session) {
+    return (
+      <div style={{maxWidth:720, margin:'40px auto', padding:16}}>
+        <h1>Sign in required</h1>
+        <p>You need to be signed in to add recipes.</p>
+        <a href="/login">Go to sign in</a>
+      </div>
+    );
+  }
+
+  // signed-in form
   return (
     <div style={{maxWidth: 720, margin: '40px auto', padding: 16}}>
       <h1>Add a Recipe</h1>
