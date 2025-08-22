@@ -60,7 +60,7 @@ export default function Home() {
   return (
     <div style={{maxWidth: 1100, margin:'24px auto', padding:16}}>
       <header style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
-        <h1>Cookbook</h1>
+        <h1>Cookbook v2</h1>
         <a href="/add-recipe">+ Add Recipe</a>
       </header>
       <EnvCheckBox />
