@@ -2,20 +2,38 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-// --- TEMP: small box to show the env vars in the UI ---
+// --- TEMP: debug box to confirm env vars ---
 function EnvCheckBox() {
-  // reach into the supabase client to see what URL/key it's using
+  // A) Values Next.js injected at build time
+  const injectedUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'undefined';
+  const injectedKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'undefined';
+
+  // B) Values the Supabase client ended up using
   // @ts-ignore
-  const url = (supabase as any).rest?.url || 'unknown';
+  const clientUrl = (supabase as any).rest?.url || 'unknown';
   // @ts-ignore
-  const key = (supabase as any).rest?.headers?.apikey || 'unknown';
+  const clientKey = (supabase as any).rest?.headers?.apikey || 'unknown';
 
   const mask = (s: string) =>
-    !s || s === 'unknown' ? s : s.slice(0, 6) + '...' + s.slice(-6);
+    !s || s === 'unknown' || s === 'undefined'
+      ? s
+      : s.slice(0, 6) + '...' + s.slice(-6);
 
   return (
-    <div style={{background:'#fff8e1', border:'1px solid #ffecb3', padding:10, borderRadius:8, marginBottom:16}}>
-      <strong>Env check:</strong> URL=<code>{url}</code> · KEY=<code>{mask(key)}</code>
+    <div
+      style={{
+        background: '#fff8e1',
+        border: '1px solid #ffecb3',
+        padding: 10,
+        borderRadius: 8,
+        marginBottom: 16,
+        lineHeight: 1.5
+      }}
+    >
+      <div><strong>Injected URL:</strong> <code>{injectedUrl}</code></div>
+      <div><strong>Injected KEY:</strong> <code>{mask(injectedKey)}</code></div>
+      <div><strong>Client URL:</strong> <code>{clientUrl}</code></div>
+      <div><strong>Client KEY:</strong> <code>{mask(clientKey)}</code></div>
     </div>
   );
 }
@@ -59,69 +77,98 @@ export default function Home() {
   }
 
   return (
-    <div style={{maxWidth: 1100, margin:'24px auto', padding:16}}>
-      <header style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
+    <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h1>Cookbook</h1>
         <a href="/add-recipe">+ Add Recipe</a>
       </header>
 
-      {/* TEMP: debug box so we can confirm env vars are wired */}
+      {/* Debug box */}
       <EnvCheckBox />
 
-      <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px,1fr))', gap:16}}>
-        {recipes.map(r=>(
-          <div key={r.id} onClick={()=>openRecipe(r)}
-            style={{border:'1px solid #eee', borderRadius:12, padding:12, cursor:'pointer', background:'#fff'}}>
-            {r.photo_url ? <img src={r.photo_url} alt={r.title} style={{width:'100%', aspectRatio:'16/9', objectFit:'cover', borderRadius:8}} /> : null}
-            <div style={{fontWeight:600, marginTop:8}}>{r.title}</div>
-            <div style={{color:'#666'}}>{r.cuisine || '—'}</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px,1fr))', gap: 16 }}>
+        {recipes.map(r => (
+          <div
+            key={r.id}
+            onClick={() => openRecipe(r)}
+            style={{
+              border: '1px solid #eee',
+              borderRadius: 12,
+              padding: 12,
+              cursor: 'pointer',
+              background: '#fff'
+            }}
+          >
+            {r.photo_url ? (
+              <img
+                src={r.photo_url}
+                alt={r.title}
+                style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 8 }}
+              />
+            ) : null}
+            <div style={{ fontWeight: 600, marginTop: 8 }}>{r.title}</div>
+            <div style={{ color: '#666' }}>{r.cuisine || '—'}</div>
           </div>
         ))}
       </div>
 
       {selected && (
-        <div style={{
-          position:'fixed', inset:0, background:'rgba(0,0,0,.5)',
-          display:'flex', alignItems:'center', justifyContent:'center', padding:16
-        }}
-          onClick={()=>setSelected(null)}
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16
+          }}
+          onClick={() => setSelected(null)}
         >
-          <div style={{width:'min(800px, 94vw)', background:'#fff', borderRadius:12, padding:16}}
-               onClick={(e)=>e.stopPropagation()}>
-            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+          <div
+            style={{ width: 'min(800px, 94vw)', background: '#fff', borderRadius: 12, padding: 16 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <div style={{fontSize:20, fontWeight:700}}>{selected.title}</div>
-                <div style={{color:'#666'}}>{selected.cuisine || ''}</div>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{selected.title}</div>
+                <div style={{ color: '#666' }}>{selected.cuisine || ''}</div>
               </div>
-              <button onClick={()=>setSelected(null)} aria-label="Close">✕</button>
+              <button onClick={() => setSelected(null)} aria-label="Close">✕</button>
             </div>
 
-            <div style={{display:'grid', gap:16, marginTop:12}}>
+            <div style={{ display: 'grid', gap: 16, marginTop: 12 }}>
               <section>
                 <h3>Ingredients</h3>
                 <ul>
-                  {ings.length ? ings.map((i, idx)=>(
-                    <li key={idx}>
-                      {[i.quantity, i.unit, i.item_name].filter(Boolean).join(' ')}
-                      {i.note ? ` (${i.note})` : ''}
-                    </li>
-                  )) : <li>No ingredients yet.</li>}
+                  {ings.length ? (
+                    ings.map((i, idx) => (
+                      <li key={idx}>
+                        {[i.quantity, i.unit, i.item_name].filter(Boolean).join(' ')}
+                        {i.note ? ` (${i.note})` : ''}
+                      </li>
+                    ))
+                  ) : (
+                    <li>No ingredients yet.</li>
+                  )}
                 </ul>
               </section>
 
               <section>
                 <h3>Instructions</h3>
                 <ol>
-                  {steps.length ? steps.map((s, idx)=>(
-                    <li key={idx}>{s.body}</li>
-                  )) : (
+                  {steps.length ? (
+                    steps.map((s, idx) => <li key={idx}>{s.body}</li>)
+                  ) : (
                     <li>This recipe has no steps yet.</li>
                   )}
                 </ol>
               </section>
 
               {selected.source_url ? (
-                <a href={selected.source_url} target="_blank" rel="noreferrer">Open Source</a>
+                <a href={selected.source_url} target="_blank" rel="noreferrer">
+                  Open Source
+                </a>
               ) : null}
             </div>
           </div>
