@@ -2,43 +2,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 
-// --- TEMP: debug box to confirm env vars ---
-function EnvCheckBox() {
-  // A) Values Next.js injected at build time
-  const injectedUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'undefined';
-  const injectedKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'undefined';
-
-  // B) Values the Supabase client ended up using
-  // @ts-ignore
-  const clientUrl = (supabase as any).rest?.url || 'unknown';
-  // @ts-ignore
-  const clientKey = (supabase as any).rest?.headers?.apikey || 'unknown';
-
-  const mask = (s: string) =>
-    !s || s === 'unknown' || s === 'undefined'
-      ? s
-      : s.slice(0, 6) + '...' + s.slice(-6);
-
-  return (
-    <div
-      style={{
-        background: '#fff8e1',
-        border: '1px solid #ffecb3',
-        padding: 10,
-        borderRadius: 8,
-        marginBottom: 16,
-        lineHeight: 1.5
-      }}
-    >
-      <div><strong>Injected URL:</strong> <code>{injectedUrl}</code></div>
-      <div><strong>Injected KEY:</strong> <code>{mask(injectedKey)}</code></div>
-      <div><strong>Client URL:</strong> <code>{clientUrl}</code></div>
-      <div><strong>Client KEY:</strong> <code>{mask(clientKey)}</code></div>
-    </div>
-  );
-}
-// --- END TEMP ---
-
 type Recipe = {
   id: string;
   title: string;
@@ -82,9 +45,6 @@ export default function Home() {
         <h1>Cookbook</h1>
         <a href="/add-recipe">+ Add Recipe</a>
       </header>
-
-      {/* Debug box */}
-      <EnvCheckBox />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px,1fr))', gap: 16 }}>
         {recipes.map(r => (
