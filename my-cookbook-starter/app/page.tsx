@@ -1,4 +1,21 @@
+'use client';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 
+// --- TEMP: show what env the app is actually using
+function EnvCheckBox() {
+  // @ts-ignore
+  const url = (supabase as any).rest?.url || 'unknown';
+  // @ts-ignore
+  const key = (supabase as any).rest?.headers?.apikey || 'unknown';
+  const mask = (s: string) => (!s || s === 'unknown' ? s : s.slice(0, 6) + '...' + s.slice(-6));
+  return (
+    <div style={{background:'#fff8e1', border:'1px solid #ffecb3', padding:10, borderRadius:8, marginBottom:16}}>
+      <strong>Env check:</strong> URL=<code>{url}</code> · KEY=<code>{mask(key)}</code>
+    </div>
+  );
+}
+// --- END TEMP
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
@@ -46,6 +63,7 @@ export default function Home() {
         <h1>Cookbook</h1>
         <a href="/add-recipe">+ Add Recipe</a>
       </header>
+      <EnvCheckBox />
 
       <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px,1fr))', gap:16}}>
         {recipes.map(r=>(
