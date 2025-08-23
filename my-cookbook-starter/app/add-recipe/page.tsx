@@ -37,14 +37,6 @@ export default function AddRecipePage() {
   }, []);
 
   async function submit() {
-      // 👇 Add this block
-  const { data: userRes, error: userErr } = await supabase.auth.getUser();
-  console.log("Current user from Supabase:", userRes?.user, "Error:", userErr);
-
-  if (!userRes?.user) {
-    alert("No signed-in user — please log in again.");
-    return;
-  
     if (!title.trim()) {
       alert('Please add a title');
       return;
