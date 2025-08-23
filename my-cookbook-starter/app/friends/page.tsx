@@ -12,7 +12,7 @@ type Recipe = {
   source_url: string | null;
   visibility: 'public' | 'friends' | 'private';
   created_at: string;
-  user_id: string; // author
+  user_id: string; // author id
 };
 
 export default function FriendsPage() {
@@ -22,54 +22,67 @@ export default function FriendsPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     (async () => {
       setLoading(true);
       setErrorMsg(null);
 
-      // 1) Check auth
+      // 1) Must be signed in to have a friends feed
       const { data: userRes, error: userErr } = await supabase.auth.getUser();
       if (userErr || !userRes?.user) {
+        if (!active) return;
         setAuthMissing(true);
         setLoading(false);
         return;
       }
       const myId = userRes.user.id;
 
-      // 2) Load my friends (publicly readable, but we query my list)
+      // 2) Get my friend ids (public table, but we filter by me)
       const { data: friendRows, error: fErr } = await supabase
         .from('friends')
         .select('friend_id')
         .eq('user_id', myId);
 
       if (fErr) {
+        if (!active) return;
         setErrorMsg(fErr.message);
         setLoading(false);
         return;
       }
 
-      const friendIds = (friendRows ?? []).map(r => r.friend_id);
+      const friendIds = (friendRows ?? []).map((r) => r.friend_id);
       if (friendIds.length === 0) {
+        if (!active) return;
         setRecipes([]);
         setLoading(false);
         return;
       }
 
-      // 3) Load recipes from my friends (RLS enforces visibility)
+      // 3) Load recipes from those authors.
+      // RLS already hides anything private (and allows public + friends for you).
+      // We filter to public/friends purely for efficiency.
       const { data: recs, error: rErr } = await supabase
         .from('recipes')
         .select('id,title,photo_url,cuisine,source_url,visibility,created_at,user_id')
         .in('user_id', friendIds)
+        .in('visibility', ['public', 'friends'])
         .order('created_at', { ascending: false })
         .limit(100);
 
       if (rErr) {
+        if (!active) return;
         setErrorMsg(rErr.message);
       } else {
+        if (!active) return;
         setRecipes((recs as Recipe[]) ?? []);
       }
 
       setLoading(false);
     })();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   if (authMissing) {
