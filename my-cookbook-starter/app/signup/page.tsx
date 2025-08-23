@@ -49,7 +49,7 @@ export default function SignUpPage() {
       setMsg('Check your inbox to confirm your email, then come back to log in.');
     } else {
       setMsg('Account created! Redirecting…');
-      window.location.href = '/dashboard';
+      window.location.href = '/cookbook';
     }
   };
 
