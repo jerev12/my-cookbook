@@ -30,7 +30,7 @@ export default function LoginPage() {
     }
 
     // On success, route to your app’s main page
-    window.location.href = '/dashboard';
+    window.location.href = '/cookbook';
   };
 
   return (
