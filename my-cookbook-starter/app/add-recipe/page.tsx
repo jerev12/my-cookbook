@@ -46,37 +46,60 @@ export default function AddRecipePage() {
       return;
     }
 
-    // 🔎 Check who Supabase thinks is signed in
+    // 1) Client-side: who does Supabase think you are?
     const { data: userRes, error: userErr } = await supabase.auth.getUser();
     alert(
       'User check:\n' +
-      JSON.stringify(userRes?.user, null, 2) +
-      '\nError: ' +
-      JSON.stringify(userErr, null, 2)
+        JSON.stringify(userRes?.user, null, 2) +
+        '\nError: ' +
+        JSON.stringify(userErr, null, 2)
     );
     if (userErr || !userRes?.user) {
       alert('No signed-in user — please log in again.');
       return;
     }
 
+    // 2) SERVER check: what does the database (Postgres) see?
+    // If this comes back null, your auth token isn’t reaching Postgres, so auth.uid() is null.
+    const { data: serverUserId, error: whoErr } = await supabase.rpc('who_am_i');
+    alert(
+      'Server sees user id: ' +
+        JSON.stringify(serverUserId) +
+        '\nError: ' +
+        JSON.stringify(whoErr)
+    );
+    if (!serverUserId) {
+      alert(
+        'The server did not receive your auth token (auth.uid() is null).\n' +
+          'Check Vercel env vars (NEXT_PUBLIC_SUPABASE_URL/ANON_KEY),\n' +
+          'Supabase URL Configuration, and that this page uses the browser client.'
+      );
+      return;
+    }
+
     setBusy(true);
 
+    // Build steps from the textarea (one step per line)
     const steps = instructions
       .split('\n')
-      .map(s => s.trim())
+      .map((s) => s.trim())
       .filter(Boolean)
       .map((body, i) => ({ step_number: i + 1, body }));
 
+    // Build ingredients array (one per input line)
+    const ingArray = ingredients
+      .map((i) => i.trim())
+      .filter(Boolean)
+      .map((i) => ({ item_name: i }));
+
+    // Call your RPC that writes the recipe + ingredients + steps
     const { error } = await supabase.rpc('add_full_recipe', {
       p_title: title,
       p_cuisine: cuisine || null,
       p_photo_url: null,
       p_source_url: sourceUrl || null,
       p_instructions: instructions,
-      p_ingredients: ingredients
-        .map(i => i.trim())
-        .filter(Boolean)
-        .map(i => ({ item_name: i })),
+      p_ingredients: ingArray,
       p_steps: steps,
       p_visibility: visibility,
     });
@@ -87,7 +110,9 @@ export default function AddRecipePage() {
       alert(`Error: ${error.message}`);
       return;
     }
+
     alert('Recipe saved!');
+    // reset form
     setTitle('');
     setCuisine('');
     setSourceUrl('');
@@ -98,7 +123,11 @@ export default function AddRecipePage() {
 
   // ------- UI states -------
   if (loading) {
-    return <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>Loading…</div>;
+    return (
+      <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>
+        Loading…
+      </div>
+    );
   }
 
   if (!session) {
@@ -117,13 +146,25 @@ export default function AddRecipePage() {
       <h1>Add a Recipe</h1>
 
       <label>Title</label>
-      <input value={title} onChange={(e) => setTitle(e.target.value)} style={{ width: '100%', padding: 8, marginBottom: 10 }} />
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        style={{ width: '100%', padding: 8, marginBottom: 10 }}
+      />
 
       <label>Cuisine</label>
-      <input value={cuisine} onChange={(e) => setCuisine(e.target.value)} style={{ width: '100%', padding: 8, marginBottom: 10 }} />
+      <input
+        value={cuisine}
+        onChange={(e) => setCuisine(e.target.value)}
+        style={{ width: '100%', padding: 8, marginBottom: 10 }}
+      />
 
       <label>Source URL (optional)</label>
-      <input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} style={{ width: '100%', padding: 8, marginBottom: 10 }} />
+      <input
+        value={sourceUrl}
+        onChange={(e) => setSourceUrl(e.target.value)}
+        style={{ width: '100%', padding: 8, marginBottom: 10 }}
+      />
 
       <label>Ingredients (one per line or add more boxes)</label>
       {ingredients.map((val, idx) => (
@@ -139,10 +180,22 @@ export default function AddRecipePage() {
           placeholder={`Ingredient ${idx + 1}`}
         />
       ))}
-      <button type="button" onClick={() => setIngredients([...ingredients, ''])}>+ Add ingredient</button>
+      <button
+        type="button"
+        onClick={() => setIngredients([...ingredients, ''])}
+      >
+        + Add ingredient
+      </button>
 
-      <label style={{ display: 'block', marginTop: 16 }}>Instructions (one step per line)</label>
-      <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={8} style={{ width: '100%', padding: 8 }} />
+      <label style={{ display: 'block', marginTop: 16 }}>
+        Instructions (one step per line)
+      </label>
+      <textarea
+        value={instructions}
+        onChange={(e) => setInstructions(e.target.value)}
+        rows={8}
+        style={{ width: '100%', padding: 8 }}
+      />
 
       <label style={{ display: 'block', marginTop: 16 }}>Visibility</label>
       <select
