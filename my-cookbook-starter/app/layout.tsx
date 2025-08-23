@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import BottomTabs from '@/components/BottomTabs';
+import BottomTabs from '../components/BottomTabs';
 
 export const metadata = { title: 'Cookbook' };
 
