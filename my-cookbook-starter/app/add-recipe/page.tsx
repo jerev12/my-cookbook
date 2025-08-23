@@ -14,8 +14,8 @@ export default function AddRecipePage() {
   const [sourceUrl, setSourceUrl] = useState('');
   const [instructions, setInstructions] = useState('');
   const [ingredients, setIngredients] = useState<string[]>(['']);
-  const [visibility, setVisibility] = useState<Visibility>('private'); // NEW
-  const [busy, setBusy] = useState(false); // small UX improvement
+  const [visibility, setVisibility] = useState<Visibility>('private');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -46,9 +46,15 @@ export default function AddRecipePage() {
       return;
     }
 
-    // 🔎 Check who Supabase thinks is signed in (this must NOT be null)
+    // 🔎 Check who Supabase thinks is signed in
     const { data: userRes, error: userErr } = await supabase.auth.getUser();
-    console.log('Current user from Supabase:', userRes?.user, 'Error:', userErr);
+    alert(
+      'User check:\n' +
+      JSON.stringify(userRes?.user, null, 2) +
+      '\nError: ' +
+      JSON.stringify(userErr, null, 2)
+    );
+
     if (userErr || !userRes?.user) {
       alert('No signed-in user — please log in again.');
       return;
@@ -73,7 +79,7 @@ export default function AddRecipePage() {
         .filter(Boolean)
         .map(i => ({ item_name: i })),
       p_steps: steps,
-      p_visibility: visibility, // NEW
+      p_visibility: visibility,
     });
 
     setBusy(false);
@@ -88,7 +94,7 @@ export default function AddRecipePage() {
     setSourceUrl('');
     setInstructions('');
     setIngredients(['']);
-    setVisibility('private'); // reset
+    setVisibility('private');
   }
 
   // ------- UI states -------
