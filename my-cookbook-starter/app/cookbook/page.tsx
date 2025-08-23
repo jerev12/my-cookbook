@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import AuthGuard from '@/components/AuthGuard'; // adjust import path if needed
+import AuthGuard from '../components/AuthGuard'; // adjust import path if needed
 
 type Recipe = {
   id: string;
