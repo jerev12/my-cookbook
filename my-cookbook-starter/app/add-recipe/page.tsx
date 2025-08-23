@@ -1,14 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import { createClient } from '@supabase/supabase-js';
 
 type Visibility = 'private' | 'friends' | 'public';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-
 export default function AddRecipePage() {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
 
@@ -20,6 +18,7 @@ export default function AddRecipePage() {
   const [ingredients, setIngredients] = useState<string[]>(['']);
   const [visibility, setVisibility] = useState<Visibility>('private');
   const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -41,71 +40,32 @@ export default function AddRecipePage() {
   }, []);
 
   async function submit() {
-    if (!title.trim()) {
-      alert('Please add a title');
-      return;
-    }
-    if (!instructions.trim()) {
-      alert('Please add instructions (one step per line)');
-      return;
-    }
+    setMsg(null);
 
-    // 1) Client-side: who does Supabase think you are?
-    const { data: userRes, error: userErr } = await supabase.auth.getUser();
-    alert(
-      'User check:\n' +
-        JSON.stringify(userRes?.user, null, 2) +
-        '\nError: ' +
-        JSON.stringify(userErr, null, 2)
-    );
-    if (userErr || !userRes?.user) {
-      alert('No signed-in user — please log in again.');
-      return;
-    }
+    if (!title.trim()) return setMsg('Please add a title');
+    if (!instructions.trim()) return setMsg('Add instructions (one step per line)');
 
-    // 2) Get the current access_token and create an authed client with it
-    const { data: sess } = await supabase.auth.getSession();
-    const accessToken = sess?.session?.access_token;
-    if (!accessToken) {
-      alert('No access token found on this page session.');
-      return;
-    }
-
-    const authed = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-      auth: { persistSession: false }, // not needed; we’re just using this client for the calls below
-    });
-
-    // 3) Ask the DATABASE who it sees (should be your UUID now)
-    const { data: serverUserId, error: whoErr } = await authed.rpc('who_am_i');
-    alert(
-      'Server sees user id: ' +
-        JSON.stringify(serverUserId) +
-        '\nError: ' +
-        JSON.stringify(whoErr, null, 2)
-    );
-    if (!serverUserId) {
-      alert('The server still did not get your token. Double-check env vars & Supabase URL config after this test.');
+    // Ensure user is present (avoids anonymous inserts)
+    const { data: userRes } = await supabase.auth.getUser();
+    if (!userRes?.user) {
+      setMsg('No signed-in user — please log in again.');
       return;
     }
 
     setBusy(true);
 
-    // Build steps from the textarea (one step per line)
     const steps = instructions
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
       .map((body, i) => ({ step_number: i + 1, body }));
 
-    // Build ingredients array (one per input line)
     const ingArray = ingredients
       .map((i) => i.trim())
       .filter(Boolean)
       .map((i) => ({ item_name: i }));
 
-    // 4) Call your RPC using the authed client so auth.uid() resolves properly
-    const { error } = await authed.rpc('add_full_recipe', {
+    const { error } = await supabase.rpc('add_full_recipe', {
       p_title: title,
       p_cuisine: cuisine || null,
       p_photo_url: null,
@@ -119,27 +79,23 @@ export default function AddRecipePage() {
     setBusy(false);
 
     if (error) {
-      alert(`Error: ${error.message}`);
+      setMsg(error.message);
       return;
     }
 
-    alert('Recipe saved!');
-    // reset form
+    // Reset + go back to My Cookbook
     setTitle('');
     setCuisine('');
     setSourceUrl('');
     setInstructions('');
     setIngredients(['']);
     setVisibility('private');
+    router.replace('/cookbook');
   }
 
   // ------- UI states -------
   if (loading) {
-    return (
-      <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>
-        Loading…
-      </div>
-    );
+    return <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>Loading…</div>;
   }
 
   if (!session) {
@@ -156,6 +112,12 @@ export default function AddRecipePage() {
   return (
     <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>
       <h1>Add a Recipe</h1>
+
+      {msg && (
+        <div style={{ margin: '8px 0 12px', color: '#b42318' }}>
+          {msg}
+        </div>
+      )}
 
       <label>Title</label>
       <input
@@ -192,16 +154,11 @@ export default function AddRecipePage() {
           placeholder={`Ingredient ${idx + 1}`}
         />
       ))}
-      <button
-        type="button"
-        onClick={() => setIngredients([...ingredients, ''])}
-      >
+      <button type="button" onClick={() => setIngredients([...ingredients, ''])}>
         + Add ingredient
       </button>
 
-      <label style={{ display: 'block', marginTop: 16 }}>
-        Instructions (one step per line)
-      </label>
+      <label style={{ display: 'block', marginTop: 16 }}>Instructions (one step per line)</label>
       <textarea
         value={instructions}
         onChange={(e) => setInstructions(e.target.value)}
