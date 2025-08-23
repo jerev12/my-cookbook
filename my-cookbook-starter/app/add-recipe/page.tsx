@@ -46,6 +46,14 @@ export default function AddRecipePage() {
       return;
     }
 
+    // 🔎 Check who Supabase thinks is signed in (this must NOT be null)
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
+    console.log('Current user from Supabase:', userRes?.user, 'Error:', userErr);
+    if (userErr || !userRes?.user) {
+      alert('No signed-in user — please log in again.');
+      return;
+    }
+
     setBusy(true);
 
     const steps = instructions
