@@ -1,8 +1,12 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { createClient } from '@supabase/supabase-js';
 
 type Visibility = 'private' | 'friends' | 'public';
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
 export default function AddRecipePage() {
   const [loading, setLoading] = useState(true);
@@ -59,21 +63,29 @@ export default function AddRecipePage() {
       return;
     }
 
-    // 2) SERVER check: what does the database (Postgres) see?
-    // If this comes back null, your auth token isn’t reaching Postgres, so auth.uid() is null.
-    const { data: serverUserId, error: whoErr } = await supabase.rpc('who_am_i');
+    // 2) Get the current access_token and create an authed client with it
+    const { data: sess } = await supabase.auth.getSession();
+    const accessToken = sess?.session?.access_token;
+    if (!accessToken) {
+      alert('No access token found on this page session.');
+      return;
+    }
+
+    const authed = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${accessToken}` } },
+      auth: { persistSession: false }, // not needed; we’re just using this client for the calls below
+    });
+
+    // 3) Ask the DATABASE who it sees (should be your UUID now)
+    const { data: serverUserId, error: whoErr } = await authed.rpc('who_am_i');
     alert(
       'Server sees user id: ' +
         JSON.stringify(serverUserId) +
         '\nError: ' +
-        JSON.stringify(whoErr)
+        JSON.stringify(whoErr, null, 2)
     );
     if (!serverUserId) {
-      alert(
-        'The server did not receive your auth token (auth.uid() is null).\n' +
-          'Check Vercel env vars (NEXT_PUBLIC_SUPABASE_URL/ANON_KEY),\n' +
-          'Supabase URL Configuration, and that this page uses the browser client.'
-      );
+      alert('The server still did not get your token. Double-check env vars & Supabase URL config after this test.');
       return;
     }
 
@@ -92,8 +104,8 @@ export default function AddRecipePage() {
       .filter(Boolean)
       .map((i) => ({ item_name: i }));
 
-    // Call your RPC that writes the recipe + ingredients + steps
-    const { error } = await supabase.rpc('add_full_recipe', {
+    // 4) Call your RPC using the authed client so auth.uid() resolves properly
+    const { error } = await authed.rpc('add_full_recipe', {
       p_title: title,
       p_cuisine: cuisine || null,
       p_photo_url: null,
