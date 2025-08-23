@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import AuthGuard from '@/components/AuthGuard'; // adjust import path if needed
 
 type Recipe = {
   id: string;
@@ -14,10 +16,35 @@ type Recipe = {
 type Step = { step_number: number; body: string };
 type Ingredient = {
   item_name: string;
-  quantity: number | null; // Supabase may return numeric as string; we’ll display as-is safely
+  quantity: number | null;
   unit: string | null;
   note: string | null;
 };
+
+// Tiny logout button component
+function LogoutButton() {
+  const router = useRouter();
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace('/login');
+  }
+
+  return (
+    <button
+      onClick={handleLogout}
+      style={{
+        padding: '6px 12px',
+        background: '#eee',
+        border: '1px solid #ccc',
+        borderRadius: 6,
+        cursor: 'pointer',
+      }}
+    >
+      Log out
+    </button>
+  );
+}
 
 export default function CookbookPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -34,19 +61,18 @@ export default function CookbookPage() {
       setLoading(true);
       setErrorMsg(null);
 
-      // who am I?
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-      if (userErr || !userRes?.user) {
-        setErrorMsg('Please sign in to view your cookbook.');
+      const { data: userRes } = await supabase.auth.getUser();
+      const userId = userRes?.user?.id;
+      if (!userId) {
+        setErrorMsg('Unable to determine current user.');
         setLoading(false);
         return;
       }
 
-      // fetch ONLY my recipes (RLS: authors can read their own)
       const { data, error } = await supabase
         .from('recipes')
         .select('id,title,cuisine,photo_url,source_url')
-        .eq('user_id', userRes.user.id)
+        .eq('user_id', userId)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -78,128 +104,186 @@ export default function CookbookPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h1 style={{ margin: 0 }}>My Cookbook</h1>
-        <a href="/add-recipe">+ Add Recipe</a>
-      </header>
-
-      {loading ? (
-        <div>Loading your recipes…</div>
-      ) : errorMsg ? (
-        <div style={{ color: '#b42318' }}>{errorMsg}</div>
-      ) : recipes.length === 0 ? (
-        <div
+    <AuthGuard>
+      <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
+        <header
           style={{
-            background: '#fff',
-            border: '1px solid #eee',
-            borderRadius: 12,
-            padding: 16,
-            color: '#606375',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 16,
           }}
         >
-          You haven’t added any recipes yet. Click “+ Add Recipe” to create your first one.
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px,1fr))', gap: 16 }}>
-          {recipes.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => openRecipe(r)}
+          <h1 style={{ margin: 0 }}>My Cookbook</h1>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <a
+              href="/add-recipe"
               style={{
-                border: '1px solid #eee',
-                borderRadius: 12,
-                padding: 12,
-                background: '#fff',
-                textAlign: 'left',
-                cursor: 'pointer',
+                padding: '6px 12px',
+                background: '#4CAF50',
+                color: '#fff',
+                borderRadius: 6,
+                textDecoration: 'none',
               }}
             >
-              {r.photo_url ? (
-                <img
-                  src={r.photo_url}
-                  alt={r.title}
-                  style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 8 }}
-                />
-              ) : null}
-              <div style={{ fontWeight: 600, marginTop: 8 }}>{r.title}</div>
-              <div style={{ color: '#666' }}>{r.cuisine || '—'}</div>
-            </button>
-          ))}
-        </div>
-      )}
+              + Add Recipe
+            </a>
+            <LogoutButton />
+          </div>
+        </header>
 
-      {selected && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
-          onClick={() => setSelected(null)}
-        >
+        {loading ? (
+          <div>Loading your recipes…</div>
+        ) : errorMsg ? (
+          <div style={{ color: '#b42318' }}>{errorMsg}</div>
+        ) : recipes.length === 0 ? (
           <div
-            style={{ width: 'min(800px, 94vw)', background: '#fff', borderRadius: 12, padding: 16 }}
-            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff',
+              border: '1px solid #eee',
+              borderRadius: 12,
+              padding: 16,
+              color: '#606375',
+            }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontSize: 20, fontWeight: 700 }}>{selected.title}</div>
-                <div style={{ color: '#666' }}>{selected.cuisine || ''}</div>
-              </div>
-              <button onClick={() => setSelected(null)} aria-label="Close">
-                ✕
+            You haven’t added any recipes yet. Click “+ Add Recipe” to create your first one.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(240px,1fr))',
+              gap: 16,
+            }}
+          >
+            {recipes.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => openRecipe(r)}
+                style={{
+                  border: '1px solid #eee',
+                  borderRadius: 12,
+                  padding: 12,
+                  background: '#fff',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                {r.photo_url ? (
+                  <img
+                    src={r.photo_url}
+                    alt={r.title}
+                    style={{
+                      width: '100%',
+                      aspectRatio: '16/9',
+                      objectFit: 'cover',
+                      borderRadius: 8,
+                    }}
+                  />
+                ) : null}
+                <div style={{ fontWeight: 600, marginTop: 8 }}>{r.title}</div>
+                <div style={{ color: '#666' }}>{r.cuisine || '—'}</div>
               </button>
-            </div>
+            ))}
+          </div>
+        )}
 
-            <div style={{ display: 'grid', gap: 16, marginTop: 12 }}>
-              <section>
-                <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
-                {detailLoading ? (
-                  <div>Loading…</div>
-                ) : (
-                  <ul>
-                    {ings.length ? (
-                      ings.map((i, idx) => {
-                        const qty = i.quantity ?? ''; // numeric may arrive as string; OK to render
-                        const parts = [qty, i.unit, i.item_name].filter(Boolean).join(' ');
-                        return <li key={idx}>{parts}{i.note ? ` (${i.note})` : ''}</li>;
-                      })
-                    ) : (
-                      <li>No ingredients yet.</li>
-                    )}
-                  </ul>
-                )}
-              </section>
+        {selected && (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: 'rgba(0,0,0,.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 16,
+            }}
+            onClick={() => setSelected(null)}
+          >
+            <div
+              style={{
+                width: 'min(800px, 94vw)',
+                background: '#fff',
+                borderRadius: 12,
+                padding: 16,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>
+                    {selected.title}
+                  </div>
+                  <div style={{ color: '#666' }}>{selected.cuisine || ''}</div>
+                </div>
+                <button onClick={() => setSelected(null)} aria-label="Close">
+                  ✕
+                </button>
+              </div>
 
-              <section>
-                <h3 style={{ margin: '8px 0' }}>Instructions</h3>
-                {detailLoading ? (
-                  <div>Loading…</div>
-                ) : (
-                  <ol>
-                    {steps.length ? (
-                      steps.map((s, idx) => <li key={idx}>{s.body}</li>)
-                    ) : (
-                      <li>This recipe has no steps yet.</li>
-                    )}
-                  </ol>
-                )}
-              </section>
+              <div style={{ display: 'grid', gap: 16, marginTop: 12 }}>
+                <section>
+                  <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
+                  {detailLoading ? (
+                    <div>Loading…</div>
+                  ) : (
+                    <ul>
+                      {ings.length ? (
+                        ings.map((i, idx) => {
+                          const qty = i.quantity ?? '';
+                          const parts = [qty, i.unit, i.item_name]
+                            .filter(Boolean)
+                            .join(' ');
+                          return (
+                            <li key={idx}>
+                              {parts}
+                              {i.note ? ` (${i.note})` : ''}
+                            </li>
+                          );
+                        })
+                      ) : (
+                        <li>No ingredients yet.</li>
+                      )}
+                    </ul>
+                  )}
+                </section>
 
-              {selected.source_url ? (
-                <a href={selected.source_url} target="_blank" rel="noreferrer">
-                  Open Source
-                </a>
-              ) : null}
+                <section>
+                  <h3 style={{ margin: '8px 0' }}>Instructions</h3>
+                  {detailLoading ? (
+                    <div>Loading…</div>
+                  ) : (
+                    <ol>
+                      {steps.length ? (
+                        steps.map((s, idx) => <li key={idx}>{s.body}</li>)
+                      ) : (
+                        <li>This recipe has no steps yet.</li>
+                      )}
+                    </ol>
+                  )}
+                </section>
+
+                {selected.source_url ? (
+                  <a
+                    href={selected.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open Source
+                  </a>
+                ) : null}
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </AuthGuard>
   );
 }
