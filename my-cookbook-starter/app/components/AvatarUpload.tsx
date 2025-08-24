@@ -8,12 +8,14 @@ type Props = {
   userId: string;
   currentUrl?: string | null;
   onUploaded: (url: string) => void;
+  /** 'inline' puts the picker beside the image; 'stack' puts it under the image (good for narrow columns / modals) */
+  layout?: 'inline' | 'stack';
 };
 
 const MAX_FILE_MB = 8;
 const ACCEPTED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
-export default function AvatarUpload({ userId, currentUrl, onUploaded }: Props) {
+export default function AvatarUpload({ userId, currentUrl, onUploaded, layout = 'inline' }: Props) {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [openCrop, setOpenCrop] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -21,7 +23,6 @@ export default function AvatarUpload({ userId, currentUrl, onUploaded }: Props) 
   function handlePick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] || null;
     e.currentTarget.value = ''; // allow re-selecting the same file
-
     if (!file) return;
 
     if (!ACCEPTED.includes(file.type)) {
@@ -43,13 +44,10 @@ export default function AvatarUpload({ userId, currentUrl, onUploaded }: Props) 
       setUploading(true);
       setOpenCrop(false);
 
-      // Always overwrite the same path so there's only ONE avatar per user
-      const filePath = `${userId}/avatar.png`;
-
+      const filePath = `${userId}/avatar.png`; // single avatar per user
       const { error: upErr } = await supabase.storage
         .from('avatars')
         .upload(filePath, cropped, { upsert: true, contentType: 'image/png' });
-
       if (upErr) throw upErr;
 
       const { data } = supabase.storage.from('avatars').getPublicUrl(filePath);
@@ -63,8 +61,13 @@ export default function AvatarUpload({ userId, currentUrl, onUploaded }: Props) 
     }
   }
 
+  const containerStyle =
+    layout === 'stack'
+      ? { display: 'grid' as const, gap: 8 }
+      : { display: 'flex', alignItems: 'center', gap: 12 };
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <div style={containerStyle}>
       {/* Circular avatar preview */}
       <img
         src={currentUrl || '/avatar-placeholder.png'}
