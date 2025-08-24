@@ -152,11 +152,15 @@ export default function FriendsList() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 12,
-                border: '1px solid #eee',
+                border: '1px solid '#eee',
                 borderRadius: 12,
                 padding: 10,
                 marginBottom: 8,
+                background: '#fff',
+                transition: 'transform .06s ease',
               }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(0)'; }}
             >
               {/* Left: open their public My Cookbook */}
               <Link
