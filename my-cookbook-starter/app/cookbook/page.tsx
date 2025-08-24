@@ -6,9 +6,9 @@ import { supabase } from '@/lib/supabaseClient';
 import AuthGuard from '../components/AuthGuard'; // adjust import path if needed
 
 // NEW: home hub components
-import FriendCount from '@/components/FriendCount';
-import FriendsListModal from '@/components/FriendsListModal';
-import ProfileSection from '@/components/ProfileSection';
+import FriendCount from '../../components/FriendCount';
+import FriendsListModal from '../../components/FriendsListModal';
+import ProfileSection from '../../components/ProfileSection';
 
 type Recipe = {
   id: string;
