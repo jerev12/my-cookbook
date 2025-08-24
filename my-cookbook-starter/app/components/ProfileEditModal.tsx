@@ -8,6 +8,7 @@ type Profile = {
   id: string;
   email?: string | null;
   display_name: string | null;
+  nickname: string | null; // NEW
   bio: string | null;
   avatar_url: string | null;
 };
@@ -22,7 +23,7 @@ type Props = {
 export default function ProfileEditModal({ open, onClose, profile, onSaved }: Props) {
   const [draft, setDraft] = useState<Profile>(profile);
   const [saving, setSaving] = useState(false);
-  const [loggingOut, setLoggingOut] = useState(false); // NEW
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     setDraft(profile);
@@ -35,12 +36,13 @@ export default function ProfileEditModal({ open, onClose, profile, onSaved }: Pr
         .from('profiles')
         .update({
           display_name: draft.display_name,
+          nickname: draft.nickname,  // NEW
           bio: draft.bio,
           avatar_url: draft.avatar_url,
           updated_at: new Date().toISOString(),
         })
         .eq('id', draft.id)
-        .select('id, email, display_name, bio, avatar_url')
+        .select('id, email, display_name, nickname, bio, avatar_url') // include nickname
         .single();
 
       if (error) {
@@ -55,12 +57,10 @@ export default function ProfileEditModal({ open, onClose, profile, onSaved }: Pr
     }
   }
 
-  // NEW: Logout inside modal
   async function handleLogout() {
     try {
       setLoggingOut(true);
       await supabase.auth.signOut();
-      // Redirect to login (adjust path if your login route differs)
       window.location.href = '/login';
     } finally {
       setLoggingOut(false);
@@ -101,19 +101,19 @@ export default function ProfileEditModal({ open, onClose, profile, onSaved }: Pr
           </button>
         </div>
 
-        {/* Grid: avatar left, fields right.
-            NOTE: We pass layout="stack" so the file picker appears BELOW the image (no overlap). */}
+        {/* Grid: avatar left (stacked controls), fields right */}
         <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, alignItems: 'start' }}>
           <div>
             <AvatarUpload
               userId={draft.id}
               currentUrl={draft.avatar_url ?? undefined}
               onUploaded={(url) => setDraft({ ...draft, avatar_url: url })}
-              layout="stack"  // NEW: stack controls under the image
+              layout="stack"
             />
           </div>
 
           <div style={{ display: 'grid', gap: 12 }}>
+            {/* Display name (no label in view mode, but keep label in editor for clarity) */}
             <label style={{ display: 'grid', gap: 6 }}>
               <span style={{ fontSize: 13, fontWeight: 600 }}>Display name</span>
               <input
@@ -123,6 +123,18 @@ export default function ProfileEditModal({ open, onClose, profile, onSaved }: Pr
               />
             </label>
 
+            {/* NEW Nickname field */}
+            <label style={{ display: 'grid', gap: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Nickname</span>
+              <input
+                value={draft.nickname ?? ''}
+                onChange={(e) => setDraft({ ...draft, nickname: e.target.value })}
+                placeholder="Optional"
+                style={{ padding: '8px 10px', border: '1px solid #ddd', borderRadius: 8 }}
+              />
+            </label>
+
+            {/* Bio (no header in view) */}
             <label style={{ display: 'grid', gap: 6 }}>
               <span style={{ fontSize: 13, fontWeight: 600 }}>Bio</span>
               <textarea
@@ -135,7 +147,7 @@ export default function ProfileEditModal({ open, onClose, profile, onSaved }: Pr
           </div>
         </div>
 
-        {/* Footer: Cancel / Save on the right, Logout on the left */}
+        {/* Footer */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
           <button
             onClick={handleLogout}
