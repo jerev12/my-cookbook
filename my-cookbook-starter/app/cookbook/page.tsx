@@ -168,14 +168,7 @@ export default function CookbookPage() {
         </header>
 
         {/* ==== TOP: My Profile (read-only with Edit modal inside component) ==== */}
-        <section
-          style={{
-            background: '#fff',
-            border: '1px solid #eee',
-            borderRadius: 12,
-            padding: 12,
-          }}
-        >
+        <section>
           <ProfileSection />
         </section>
 
