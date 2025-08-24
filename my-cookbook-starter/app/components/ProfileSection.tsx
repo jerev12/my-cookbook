@@ -8,6 +8,7 @@ type Profile = {
   id: string;
   email?: string | null;
   display_name: string | null;
+  nickname: string | null;   // NEW
   bio: string | null;
   avatar_url: string | null;
 };
@@ -25,7 +26,7 @@ export default function ProfileSection() {
 
       const { data: p } = await supabase
         .from('profiles')
-        .select('id, email, display_name, bio, avatar_url')
+        .select('id, email, display_name, nickname, bio, avatar_url') // include nickname
         .eq('id', user.id)
         .single();
 
@@ -33,11 +34,10 @@ export default function ProfileSection() {
         if (p) {
           setProfile(p as Profile);
         } else {
-          // Fallback create if missing
           const { data: inserted } = await supabase
             .from('profiles')
-            .insert({ id: user.id, email: user.email, display_name: user.email })
-            .select('id, email, display_name, bio, avatar_url')
+            .insert({ id: user.id, email: user.email, display_name: user.email, nickname: null })
+            .select('id, email, display_name, nickname, bio, avatar_url')
             .single();
           setProfile(inserted as Profile);
         }
@@ -52,41 +52,42 @@ export default function ProfileSection() {
 
   return (
     <section>
-      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>My Profile</div>
-
-      {/* Read-only layout: avatar left ~1/3, fields right */}
+      {/* Read-only layout: smaller avatar on the left, text on the right */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '280px 1fr',
-          gap: 16,
+          gridTemplateColumns: '160px 1fr', // smaller so text never gets pushed off on mobile
+          gap: 12,
           alignItems: 'start',
         }}
       >
-        {/* Avatar */}
+        {/* Avatar (smaller) */}
         <div>
           <img
             src={profile.avatar_url || '/avatar-placeholder.png'}
             alt="avatar"
             style={{
-              width: 220, height: 220, borderRadius: '50%',
+              width: 140, height: 140, borderRadius: '50%',
               objectFit: 'cover', border: '1px solid #ddd', background: '#f5f5f5',
             }}
           />
         </div>
 
-        {/* Text details (read-only) */}
-        <div style={{ display: 'grid', gap: 10 }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#555' }}>Display name</div>
-            <div style={{ paddingTop: 4 }}>{profile.display_name || '—'}</div>
+        {/* Text details (no headers) */}
+        <div style={{ display: 'grid', gap: 6 }}>
+          {/* Display name: bigger & bold, no label */}
+          <div style={{ fontSize: 18, fontWeight: 800 }}>
+            {profile.display_name || '—'}
           </div>
 
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#555' }}>Bio</div>
-            <div style={{ paddingTop: 4, whiteSpace: 'pre-wrap', color: '#222' }}>
-              {profile.bio || '—'}
-            </div>
+          {/* Nickname: small, muted (optional line only if present) */}
+          <div style={{ fontSize: 13, color: '#666' }}>
+            {profile.nickname ? `“${profile.nickname}”` : ' '}
+          </div>
+
+          {/* Bio: plain paragraph, no header */}
+          <div style={{ whiteSpace: 'pre-wrap', color: '#222', marginTop: 4 }}>
+            {profile.bio || ''}
           </div>
 
           <div style={{ marginTop: 8 }}>
