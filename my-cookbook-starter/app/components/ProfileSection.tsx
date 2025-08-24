@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import AvatarUpload from './AvatarUpload';
+import ProfileEditModal from './ProfileEditModal';
 
 type Profile = {
   id: string;
@@ -13,126 +13,106 @@ type Profile = {
 };
 
 export default function ProfileSection() {
-  const [userId, setUserId] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [openEdit, setOpenEdit] = useState(false);
 
   useEffect(() => {
     let ignore = false;
-
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
-      setUserId(user.id);
 
-      // Fetch profile
-      const { data: p, error } = await supabase
+      const { data: p } = await supabase
         .from('profiles')
         .select('id, email, display_name, bio, avatar_url')
         .eq('id', user.id)
         .single();
 
-      // If somehow missing (older users created before your trigger), create a minimal row
-      if (error && (error as any).code === 'PGRST116') {
-        const fallback = {
-          id: user.id,
-          email: user.email ?? null,
-          display_name: user.email ?? '',
-          bio: null,
-          avatar_url: null,
-        };
-        const { data: inserted, error: insErr } = await supabase
-          .from('profiles')
-          .insert({
-            id: fallback.id,
-            email: fallback.email,
-            display_name: fallback.display_name,
-          })
-          .select('id, email, display_name, bio, avatar_url')
-          .single();
-        if (!ignore && !insErr) setProfile(inserted as Profile);
-      } else if (!ignore) {
-        setProfile(p as Profile);
+      if (!ignore) {
+        if (p) {
+          setProfile(p as Profile);
+        } else {
+          // Fallback create if missing
+          const { data: inserted } = await supabase
+            .from('profiles')
+            .insert({ id: user.id, email: user.email, display_name: user.email })
+            .select('id, email, display_name, bio, avatar_url')
+            .single();
+          setProfile(inserted as Profile);
+        }
+        setLoading(false);
       }
-
-      if (!ignore) setLoading(false);
     }
-
     load();
     return () => { ignore = true; };
   }, []);
 
-  async function save() {
-    if (!userId || !profile) return;
-    setSaving(true);
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        display_name: profile.display_name,
-        bio: profile.bio,
-        avatar_url: profile.avatar_url,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', userId);
-    setSaving(false);
-    if (error) alert('Save failed'); else alert('Saved!');
-  }
-
-  async function logout() {
-    await supabase.auth.signOut();
-    window.location.href = '/login'; // adjust to your auth route
-  }
-
-  if (loading) return null;
-  if (!profile) return null;
+  if (loading || !profile) return null;
 
   return (
-    <section className="rounded-lg border p-4">
-      <h2 className="mb-3 text-lg font-semibold">My Profile</h2>
+    <section>
+      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>My Profile</div>
 
-      <div className="mb-4">
-        <AvatarUpload
-          userId={profile.id}
-          currentUrl={profile.avatar_url ?? undefined}
-          onUploaded={(url) => setProfile({ ...profile, avatar_url: url })}
-        />
+      {/* Read-only layout: avatar left ~1/3, fields right */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '280px 1fr',
+          gap: 16,
+          alignItems: 'start',
+        }}
+      >
+        {/* Avatar */}
+        <div>
+          <img
+            src={profile.avatar_url || '/avatar-placeholder.png'}
+            alt="avatar"
+            style={{
+              width: 220, height: 220, borderRadius: '50%',
+              objectFit: 'cover', border: '1px solid #ddd', background: '#f5f5f5',
+            }}
+          />
+        </div>
+
+        {/* Text details (read-only) */}
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#555' }}>Display name</div>
+            <div style={{ paddingTop: 4 }}>{profile.display_name || '—'}</div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#555' }}>Bio</div>
+            <div style={{ paddingTop: 4, whiteSpace: 'pre-wrap', color: '#222' }}>
+              {profile.bio || '—'}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={() => setOpenEdit(true)}
+              style={{
+                padding: '8px 12px',
+                background: '#111',
+                color: '#fff',
+                borderRadius: 8,
+                border: '1px solid #111',
+              }}
+            >
+              Edit Profile
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="mb-3">
-        <label className="block text-sm font-medium mb-1">Display name</label>
-        <input
-          className="w-full rounded border px-3 py-2"
-          value={profile.display_name ?? ''}
-          onChange={(e) => setProfile({ ...profile, display_name: e.target.value })}
-        />
-      </div>
-
-      <div className="mb-4">
-        <label className="block text-sm font-medium mb-1">Bio</label>
-        <textarea
-          className="w-full rounded border px-3 py-2"
-          rows={3}
-          value={profile.bio ?? ''}
-          onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
-        />
-      </div>
-
-      <div className="flex items-center gap-2">
-        <button
-          onClick={save}
-          disabled={saving}
-          className="rounded bg-black px-3 py-2 text-white disabled:opacity-60"
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        <button
-          onClick={logout}
-          className="rounded border px-3 py-2"
-        >
-          Logout
-        </button>
-      </div>
+      {/* Edit modal */}
+      <ProfileEditModal
+        open={openEdit}
+        onClose={() => setOpenEdit(false)}
+        profile={profile}
+        onSaved={(p) => setProfile(p)}
+      />
     </section>
   );
 }
