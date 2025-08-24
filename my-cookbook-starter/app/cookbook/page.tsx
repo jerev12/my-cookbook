@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import AuthGuard from '../components/AuthGuard'; // adjust import path if needed
 
+// NEW: home hub components
+import FriendCount from '@/components/FriendCount';
+import FriendsListModal from '@/components/FriendsListModal';
+import ProfileSection from '@/components/ProfileSection';
+
 type Recipe = {
   id: string;
   title: string;
@@ -21,7 +26,7 @@ type Ingredient = {
   note: string | null;
 };
 
-// Tiny logout button component
+// Tiny logout button component (kept from your code)
 function LogoutButton() {
   const router = useRouter();
 
@@ -47,6 +52,7 @@ function LogoutButton() {
 }
 
 export default function CookbookPage() {
+  const [userId, setUserId] = useState<string | null>(null); // NEW: needed for FriendCount/Profile
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -56,14 +62,18 @@ export default function CookbookPage() {
   const [ings, setIngs] = useState<Ingredient[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // NEW: friends modal state
+  const [friendsOpen, setFriendsOpen] = useState(false);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
       setErrorMsg(null);
 
       const { data: userRes } = await supabase.auth.getUser();
-      const userId = userRes?.user?.id;
-      if (!userId) {
+      const uid = userRes?.user?.id || null;
+      setUserId(uid);
+      if (!uid) {
         setErrorMsg('Unable to determine current user.');
         setLoading(false);
         return;
@@ -72,7 +82,7 @@ export default function CookbookPage() {
       const { data, error } = await supabase
         .from('recipes')
         .select('id,title,cuisine,photo_url,source_url')
-        .eq('user_id', userId)
+        .eq('user_id', uid)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -106,6 +116,7 @@ export default function CookbookPage() {
   return (
     <AuthGuard>
       <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
+        {/* HEADER */}
         <header
           style={{
             display: 'flex',
@@ -132,6 +143,148 @@ export default function CookbookPage() {
           </div>
         </header>
 
+        {/* ===== HOME HUB ROW ===== */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
+          {/* Community card */}
+          <section
+            style={{
+              background: '#fff',
+              border: '1px solid #eee',
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Community</div>
+            {userId ? (
+              <button
+                onClick={() => setFriendsOpen(true)}
+                style={{
+                  display: 'inline-flex',
+                  gap: 8,
+                  alignItems: 'center',
+                  padding: '6px 10px',
+                  border: '1px solid #ddd',
+                  borderRadius: 8,
+                  background: '#f9f9f9',
+                  cursor: 'pointer',
+                }}
+              >
+                {/* FriendCount will render the number; onClick opens modal */}
+                <span>Friends</span>
+                <span
+                  style={{
+                    background: '#e9e9e9',
+                    borderRadius: 6,
+                    padding: '2px 8px',
+                    fontSize: 12,
+                  }}
+                >
+                  {/* Reuse FriendCount for the numeric badge (no nav) */}
+                  <FriendCount userId={userId} />
+                </span>
+              </button>
+            ) : (
+              <div>Loading…</div>
+            )}
+
+            <div style={{ marginTop: 8 }}>
+              <a href="/friends/find" style={{ fontSize: 13, textDecoration: 'underline' }}>
+                Find friends
+              </a>
+            </div>
+          </section>
+
+          {/* My Recipes quick actions */}
+          <section
+            style={{
+              background: '#fff',
+              border: '1px solid #eee',
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>My Recipes</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <a
+                href="/add-recipe"
+                style={{
+                  padding: '6px 12px',
+                  background: '#4CAF50',
+                  color: '#fff',
+                  borderRadius: 6,
+                  textDecoration: 'none',
+                }}
+              >
+                New recipe
+              </a>
+              <a
+                href="/recipes"
+                style={{
+                  padding: '6px 12px',
+                  background: '#fff',
+                  border: '1px solid #ddd',
+                  borderRadius: 6,
+                  textDecoration: 'none',
+                  color: '#111',
+                }}
+              >
+                View all
+              </a>
+            </div>
+          </section>
+
+          {/* Feed entry (stub) */}
+          <section
+            style={{
+              background: '#fff',
+              border: '1px solid #eee',
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Feed</div>
+            <p style={{ margin: 0, color: '#606375', fontSize: 13 }}>
+              See public & friends‑only recipes from friends.
+            </p>
+            <div style={{ marginTop: 8 }}>
+              <a
+                href="/feed"
+                style={{
+                  padding: '6px 12px',
+                  background: '#fff',
+                  border: '1px solid #ddd',
+                  borderRadius: 6,
+                  textDecoration: 'none',
+                  color: '#111',
+                }}
+              >
+                Open feed
+              </a>
+            </div>
+          </section>
+        </div>
+
+        {/* ===== PROFILE EDITOR ===== */}
+        <section
+          style={{
+            background: '#fff',
+            border: '1px solid #eee',
+            borderRadius: 12,
+            padding: 16,
+            marginBottom: 16,
+          }}
+        >
+          <ProfileSection />
+        </section>
+
+        {/* ===== YOUR RECIPES GRID (unchanged) ===== */}
         {loading ? (
           <div>Loading your recipes…</div>
         ) : errorMsg ? (
@@ -188,6 +341,7 @@ export default function CookbookPage() {
           </div>
         )}
 
+        {/* ===== RECIPE DETAIL MODAL (unchanged) ===== */}
         {selected && (
           <div
             style={{
@@ -198,6 +352,7 @@ export default function CookbookPage() {
               alignItems: 'center',
               justifyContent: 'center',
               padding: 16,
+              zIndex: 50,
             }}
             onClick={() => setSelected(null)}
           >
@@ -283,6 +438,9 @@ export default function CookbookPage() {
             </div>
           </div>
         )}
+
+        {/* ===== FRIENDS LIST MODAL (NEW) ===== */}
+        <FriendsListModal open={friendsOpen} onClose={() => setFriendsOpen(false)} />
       </div>
     </AuthGuard>
   );
