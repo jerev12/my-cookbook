@@ -1,119 +1,119 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
-import ProfileEditModal from './ProfileEditModal';
+import { useCallback, useMemo, useState } from 'react';
+import Cropper from 'react-easy-crop';
+import { fileToImage, getCroppedImageDataURL, dataUrlToFile } from './image-utils';
+import type { Area } from 'react-easy-crop';
 
-type Profile = {
-  id: string;
-  email?: string | null;
-  display_name: string | null;
-  nickname: string | null;   // NEW
-  bio: string | null;
-  avatar_url: string | null;
+type Props = {
+  open: boolean;
+  file: File | null;
+  onCancel: () => void;
+  onConfirm: (croppedFile: File) => void;
 };
 
-export default function ProfileSection() {
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [openEdit, setOpenEdit] = useState(false);
+export default function AvatarCropModal({ open, file, onCancel, onConfirm }: Props) {
+  const [zoom, setZoom] = useState(1);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [pixelArea, setPixelArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  useEffect(() => {
-    let ignore = false;
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoading(false); return; }
+  const url = useMemo(() => (file ? URL.createObjectURL(file) : ''), [file]);
 
-      const { data: p } = await supabase
-        .from('profiles')
-        .select('id, email, display_name, nickname, bio, avatar_url') // include nickname
-        .eq('id', user.id)
-        .single();
-
-      if (!ignore) {
-        if (p) {
-          setProfile(p as Profile);
-        } else {
-          const { data: inserted } = await supabase
-            .from('profiles')
-            .insert({ id: user.id, email: user.email, display_name: user.email, nickname: null })
-            .select('id, email, display_name, nickname, bio, avatar_url')
-            .single();
-          setProfile(inserted as Profile);
-        }
-        setLoading(false);
-      }
-    }
-    load();
-    return () => { ignore = true; };
+  const onCropComplete = useCallback((_area: Area, areaPixels: Area) => {
+    setPixelArea({
+      x: Math.round(areaPixels.x),
+      y: Math.round(areaPixels.y),
+      width: Math.round(areaPixels.width),
+      height: Math.round(areaPixels.height),
+    });
   }, []);
 
-  if (loading || !profile) return null;
+  async function handleConfirm() {
+    if (!file || !pixelArea) return;
+    const img = await fileToImage(file);
+    const dataUrl = getCroppedImageDataURL(img, pixelArea, 512);
+    const out = await dataUrlToFile(dataUrl, 'avatar.png');
+    onConfirm(out);
+  }
+
+  if (!open) return null;
 
   return (
-    <section>
-      {/* Read-only layout: smaller avatar on the left, text on the right */}
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+      aria-modal="true" role="dialog"
+    >
+      {/* Backdrop */}
+      <div
+        onClick={onCancel}
+        style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.4)' }}
+      />
+
+      {/* Panel */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: '160px 1fr', // smaller so text never gets pushed off on mobile
-          gap: 12,
-          alignItems: 'start',
+          position: 'relative', zIndex: 101, width: 'min(92vw, 640px)',
+          background: '#fff', borderRadius: 12, padding: 16,
+          boxShadow: '0 10px 30px rgba(0,0,0,.2)'
         }}
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Avatar (smaller) */}
-        <div>
-          <img
-            src={profile.avatar_url || '/avatar-placeholder.png'}
-            alt="avatar"
-            style={{
-              width: 140, height: 140, borderRadius: '50%',
-              objectFit: 'cover', border: '1px solid #ddd', background: '#f5f5f5',
-            }}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{ fontWeight: 700 }}>Crop your avatar</div>
+          <button
+            onClick={onCancel}
+            aria-label="Close"
+            style={{ border: '1px solid #ddd', borderRadius: 6, padding: '4px 8px', background: '#fff' }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ position: 'relative', width: '100%', height: 360, background: '#111', borderRadius: 8, overflow: 'hidden' }}>
+          <Cropper
+            image={url}
+            crop={crop}
+            zoom={zoom}
+            aspect={1}
+            cropShape="round"      // visual circle mask
+            showGrid={false}
+            onCropChange={setCrop}
+            onZoomChange={setZoom}
+            onCropComplete={onCropComplete}
+            objectFit="contain"
           />
         </div>
 
-        {/* Text details (no headers) */}
-        <div style={{ display: 'grid', gap: 6 }}>
-          {/* Display name: bigger & bold, no label */}
-          <div style={{ fontSize: 18, fontWeight: 800 }}>
-            {profile.display_name || '—'}
-          </div>
+        {/* Controls */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 12 }}>
+          <label style={{ fontSize: 13, color: '#555' }}>Zoom</label>
+          <input
+            type="range"
+            min={1} max={3} step={0.01}
+            value={zoom}
+            onChange={(e) => setZoom(parseFloat(e.target.value))}
+            style={{ flex: 1 }}
+          />
+        </div>
 
-          {/* Nickname: small, muted (optional line only if present) */}
-          <div style={{ fontSize: 13, color: '#666' }}>
-            {profile.nickname ? `“${profile.nickname}”` : ' '}
-          </div>
-
-          {/* Bio: plain paragraph, no header */}
-          <div style={{ whiteSpace: 'pre-wrap', color: '#222', marginTop: 4 }}>
-            {profile.bio || ''}
-          </div>
-
-          <div style={{ marginTop: 8 }}>
-            <button
-              onClick={() => setOpenEdit(true)}
-              style={{
-                padding: '8px 12px',
-                background: '#111',
-                color: '#fff',
-                borderRadius: 8,
-                border: '1px solid #111',
-              }}
-            >
-              Edit Profile
-            </button>
-          </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+          <button
+            onClick={onCancel}
+            style={{ padding: '6px 12px', border: '1px solid #ddd', borderRadius: 6, background: '#fff' }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            style={{ padding: '6px 12px', borderRadius: 6, background: '#111', color: '#fff' }}
+          >
+            Save
+          </button>
         </div>
       </div>
-
-      {/* Edit modal */}
-      <ProfileEditModal
-        open={openEdit}
-        onClose={() => setOpenEdit(false)}
-        profile={profile}
-        onSaved={(p) => setProfile(p)}
-      />
-    </section>
+    </div>
   );
 }
