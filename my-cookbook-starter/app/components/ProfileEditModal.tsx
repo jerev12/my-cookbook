@@ -15,15 +15,14 @@ type Profile = {
 type Props = {
   open: boolean;
   onClose: () => void;
-  // Current profile to prefill the modal
   profile: Profile;
-  // Called after a successful save with the updated profile
   onSaved: (p: Profile) => void;
 };
 
 export default function ProfileEditModal({ open, onClose, profile, onSaved }: Props) {
   const [draft, setDraft] = useState<Profile>(profile);
   const [saving, setSaving] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false); // NEW
 
   useEffect(() => {
     setDraft(profile);
@@ -53,6 +52,18 @@ export default function ProfileEditModal({ open, onClose, profile, onSaved }: Pr
       onClose();
     } finally {
       setSaving(false);
+    }
+  }
+
+  // NEW: Logout inside modal
+  async function handleLogout() {
+    try {
+      setLoggingOut(true);
+      await supabase.auth.signOut();
+      // Redirect to login (adjust path if your login route differs)
+      window.location.href = '/login';
+    } finally {
+      setLoggingOut(false);
     }
   }
 
@@ -90,13 +101,15 @@ export default function ProfileEditModal({ open, onClose, profile, onSaved }: Pr
           </button>
         </div>
 
-        {/* 2-col editor layout: avatar left, fields right */}
+        {/* Grid: avatar left, fields right.
+            NOTE: We pass layout="stack" so the file picker appears BELOW the image (no overlap). */}
         <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, alignItems: 'start' }}>
           <div>
             <AvatarUpload
               userId={draft.id}
               currentUrl={draft.avatar_url ?? undefined}
               onUploaded={(url) => setDraft({ ...draft, avatar_url: url })}
+              layout="stack"  // NEW: stack controls under the image
             />
           </div>
 
@@ -119,23 +132,34 @@ export default function ProfileEditModal({ open, onClose, profile, onSaved }: Pr
                 style={{ padding: '8px 10px', border: '1px solid #ddd', borderRadius: 8, resize: 'vertical' }}
               />
             </label>
+          </div>
+        </div>
 
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button
-                onClick={onClose}
-                style={{ padding: '8px 12px', background: '#fff', border: '1px solid #ddd', borderRadius: 8 }}
-                disabled={saving}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                style={{ padding: '8px 12px', background: '#111', color: '#fff', borderRadius: 8, border: '1px solid #111' }}
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-            </div>
+        {/* Footer: Cancel / Save on the right, Logout on the left */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16 }}>
+          <button
+            onClick={handleLogout}
+            disabled={loggingOut}
+            style={{ padding: '8px 12px', background: '#fff', border: '1px solid #ddd', borderRadius: 8 }}
+          >
+            {loggingOut ? 'Logging out…' : 'Log out'}
+          </button>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={onClose}
+              style={{ padding: '8px 12px', background: '#fff', border: '1px solid #ddd', borderRadius: 8 }}
+              disabled={saving}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{ padding: '8px 12px', background: '#111', color: '#fff', borderRadius: 8, border: '1px solid #111' }}
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
           </div>
         </div>
 
