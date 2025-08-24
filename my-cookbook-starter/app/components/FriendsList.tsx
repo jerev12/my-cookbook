@@ -152,7 +152,7 @@ export default function FriendsList() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 12,
-                border: '1px solid '#eee',
+                border: '1px solid #eee',
                 borderRadius: 12,
                 padding: 10,
                 marginBottom: 8,
