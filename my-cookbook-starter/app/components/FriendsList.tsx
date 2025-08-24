@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
 type Profile = { id: string; display_name: string | null; avatar_url: string | null };
@@ -10,7 +11,7 @@ export default function FriendsList() {
   const [friends, setFriends] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Track only MY outgoing edges to control the button state
+  // Track MY outgoing edges so we can flip Friend/Add Friend without reloading
   const [myOutEdges, setMyOutEdges] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -33,7 +34,7 @@ export default function FriendsList() {
       }
       const friendIds: string[] = (ids as string[]) ?? [];
 
-      // 2) Load MY outgoing edges to decide button text/color
+      // 2) Load MY outgoing edges (to decide button state)
       const { data: outRows, error: outErr } = await supabase
         .from('friends')
         .select('friend_id')
@@ -42,7 +43,7 @@ export default function FriendsList() {
       const outSet = new Set<string>((outRows ?? []).map(r => r.friend_id as string));
       if (!ignore) setMyOutEdges(outSet);
 
-      // 3) Fetch profile details to render rows
+      // 3) Fetch profile details for rows
       if (friendIds.length === 0) {
         if (!ignore) { setFriends([]); setLoading(false); }
         return;
@@ -104,7 +105,7 @@ export default function FriendsList() {
       return;
     }
 
-    // Do NOT remove the row from UI — allow undo until modal closes.
+    // Keep the row visible until modal closes; just flip the button state
     setMyOutEdges(prev => {
       const next = new Set(prev);
       next.delete(friendId);
@@ -140,6 +141,10 @@ export default function FriendsList() {
             color: '#111',
           };
 
+          // Use display_name as handle (URL-encode). Fallback to id if missing.
+          const handle = f.display_name ? encodeURIComponent(f.display_name) : f.id;
+          const href = `/u/${handle}`;
+
           return (
             <li
               key={f.id}
@@ -153,18 +158,36 @@ export default function FriendsList() {
                 marginBottom: 8,
               }}
             >
-              <img
-                src={f.avatar_url || '/avatar-placeholder.png'}
-                alt=""
-                style={{ height: 40, width: 40, borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }}
-              />
-              <div style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {f.display_name || f.id}
-              </div>
+              {/* Left: open their public My Cookbook */}
+              <Link
+                href={href}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  textDecoration: 'none',
+                  color: 'inherit',
+                  flex: 1,
+                  minWidth: 0,
+                }}
+              >
+                <img
+                  src={f.avatar_url || '/avatar-placeholder.png'}
+                  alt=""
+                  style={{
+                    height: 40, width: 40, borderRadius: '50%',
+                    objectFit: 'cover', border: '1px solid #ddd'
+                  }}
+                />
+                <div style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {f.display_name || f.id}
+                </div>
+              </Link>
 
+              {/* Right: status button (prevent link navigation) */}
               {iFollow ? (
                 <button
-                  onClick={() => unfriend(f.id)}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); unfriend(f.id); }}
                   style={btnFriend}
                   aria-label="Remove friend"
                   title="Remove friend"
@@ -173,7 +196,7 @@ export default function FriendsList() {
                 </button>
               ) : (
                 <button
-                  onClick={() => addFriend(f.id)}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFriend(f.id); }}
                   style={btnAdd}
                   aria-label="Add friend"
                   title="Add friend"
