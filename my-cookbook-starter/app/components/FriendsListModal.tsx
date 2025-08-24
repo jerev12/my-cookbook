@@ -1,6 +1,6 @@
 'use client';
 
-import Modal from './Modal';
+import { MouseEvent } from 'react';
 import FriendsList from './FriendsList';
 
 type Props = {
@@ -9,13 +9,61 @@ type Props = {
 };
 
 export default function FriendsListModal({ open, onClose }: Props) {
+  if (!open) return null;
+
+  function stop(e: MouseEvent<HTMLDivElement>) {
+    e.stopPropagation();
+  }
+
   return (
-    <Modal open={open} onClose={onClose} title="Friends">
-      <div className="space-y-3">
-        <FriendsList />
-        {/* Place for future: “Find friends” button */}
-        {/* <Link href="/friends/find" className="rounded bg-black px-3 py-2 text-white inline-block">Find friends</Link> */}
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 12,
+        zIndex: 60, // above the recipe modal (which used 50)
+      }}
+      aria-modal="true"
+      role="dialog"
+      onClick={onClose}
+    >
+      <div
+        style={{
+          width: 'min(800px, 94vw)',
+          background: '#fff',
+          borderRadius: 12,
+          padding: 16,
+          position: 'relative',
+        }}
+        onClick={stop}
+      >
+        {/* Close button only (no title) */}
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            border: '1px solid #ddd',
+            borderRadius: 8,
+            padding: '4px 8px',
+            background: '#fff',
+            cursor: 'pointer',
+          }}
+        >
+          ✕
+        </button>
+
+        {/* Body */}
+        <div style={{ marginTop: 8 }}>
+          <FriendsList />
+        </div>
       </div>
-    </Modal>
+    </div>
   );
 }
