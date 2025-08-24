@@ -82,7 +82,7 @@ export default function ProfileSection() {
 
           {/* Nickname: small, muted (optional line only if present) */}
           <div style={{ fontSize: 13, color: '#666' }}>
-            {profile.nickname ? `“${profile.nickname}”` : ' '}
+            {profile.nickname || ' '}
           </div>
 
           {/* Bio: plain paragraph, no header */}
