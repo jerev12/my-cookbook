@@ -1,12 +1,15 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import Link from 'next/link';
 
-type Props = { userId: string };
+type Props = {
+  userId: string;
+  onOpen?: () => void; // if provided, we’ll call this instead of navigating
+};
 
-export default function FriendCount({ userId }: Props) {
+export default function FriendCount({ userId, onOpen }: Props) {
   const [count, setCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -14,7 +17,6 @@ export default function FriendCount({ userId }: Props) {
     let ignore = false;
     async function load() {
       setLoading(true);
-      // Calls the SQL function: public.friend_count(uid)
       const { data, error } = await supabase.rpc('friend_count', { uid: userId });
       if (!ignore) {
         if (error) {
@@ -30,15 +32,34 @@ export default function FriendCount({ userId }: Props) {
     return () => { ignore = true; };
   }, [userId]);
 
+  const inner = (
+    <>
+      <span className="font-medium">Friends</span>
+      <span className="rounded bg-gray-200 px-2 py-0.5 text-sm">
+        {loading ? '…' : count ?? 0}
+      </span>
+    </>
+  );
+
+  if (onOpen) {
+    return (
+      <button
+        type="button"
+        onClick={onOpen}
+        className="inline-flex items-center gap-2 rounded-md border px-3 py-2 hover:bg-gray-50"
+      >
+        {inner}
+      </button>
+    );
+  }
+
+  // fallback: behave like a link if no onOpen provided
   return (
     <Link
       href="/friends"
       className="inline-flex items-center gap-2 rounded-md border px-3 py-2 hover:bg-gray-50"
     >
-      <span className="font-medium">Friends</span>
-      <span className="rounded bg-gray-200 px-2 py-0.5 text-sm">
-        {loading ? '…' : count ?? 0}
-      </span>
+      {inner}
     </Link>
   );
 }
