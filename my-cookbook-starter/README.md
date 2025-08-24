@@ -124,4 +124,5 @@ grant execute on function public.add_full_recipe(text, text, text, text, text, j
 - This starter expects you to be signed in for inserts (RLS uses `auth.uid()`). Enable Auth in Supabase (Email/Magic Link is easiest) and add a simple sign-in later.
 - Photos: later, upload to a Storage bucket and save the public URL to `photo_url`.
 
-- 
+
+
