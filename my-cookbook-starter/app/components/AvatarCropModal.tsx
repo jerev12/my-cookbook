@@ -19,7 +19,7 @@ export default function AvatarCropModal({ open, file, onCancel, onConfirm }: Pro
 
   const url = useMemo(() => (file ? URL.createObjectURL(file) : ''), [file]);
 
-  const onCropComplete = useCallback((_area, areaPixels) => {
+  const onCropComplete = useCallback((_area: Area, areaPixels: Area) => {
     setPixelArea({
       x: Math.round(areaPixels.x),
       y: Math.round(areaPixels.y),
