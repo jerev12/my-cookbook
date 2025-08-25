@@ -259,7 +259,7 @@ export default function CommunitySearch() {
       gap: 8,
     } as CSSProperties,
     userLeft: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } as CSSProperties,
-    avatar: { width: 50, height: 50, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
+    avatar: { width: 100, height: 100, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
     name: {
       fontSize: 14,
       whiteSpace: 'nowrap',
