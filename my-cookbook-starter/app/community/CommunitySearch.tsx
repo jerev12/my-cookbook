@@ -32,7 +32,7 @@ export default function CommunitySearch() {
   // search + filters
   const [q, setQ] = useState('');
   const debouncedQ = useDebounce(q, 300);
-  const queryActive = debouncedQ.trim().length > 0; // 👈 only search after typing
+  const queryActive = debouncedQ.trim().length > 0; // only search after typing
   const [cuisineFilter, setCuisineFilter] = useState<string>('');
 
   // paging
@@ -45,13 +45,13 @@ export default function CommunitySearch() {
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  // me
+  // me / friendships
   const [myId, setMyId] = useState<string | null>(null);
   const [friendStatus, setFriendStatus] = useState<Record<string, FriendRelation>>({});
 
   const abortRef = useRef<AbortController | null>(null);
 
-  // get current user id
+  // current user id
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -64,10 +64,9 @@ export default function CommunitySearch() {
     setPage(0);
   }, [tab, debouncedQ, cuisineFilter]);
 
-  // fetch when deps change, but only after user typed something
+  // fetch when deps change (but only after user typed something)
   useEffect(() => {
     if (!queryActive) {
-      // clear lists when there is no query
       setUsers([]);
       setRecipes([]);
       setHasMore(false);
@@ -83,14 +82,12 @@ export default function CommunitySearch() {
     setLoading(true);
     setErrMsg(null);
 
-    // cancel any in-flight call
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
     try {
       if (tab === 'users') {
-        // USERS
         const { data, error } = await supabase.rpc('search_users', {
           q: debouncedQ || null,
           limit_count: PAGE_SIZE,
@@ -102,7 +99,7 @@ export default function CommunitySearch() {
         setUsers(rows);
         setHasMore(rows.length === PAGE_SIZE);
 
-        // batch fetch friendship statuses
+        // friendship statuses
         if (rows.length > 0) {
           const ids = rows.map(u => u.id);
           const { data: statuses, error: sErr } = await supabase.rpc('get_friend_statuses', {
@@ -121,7 +118,6 @@ export default function CommunitySearch() {
 
         setRecipes([]);
       } else {
-        // RECIPES (includes your own; RLS controls visibility)
         const { data, error } = await supabase.rpc('search_recipes', {
           q: debouncedQ || null,
           limit_count: PAGE_SIZE,
@@ -144,18 +140,17 @@ export default function CommunitySearch() {
     }
   }
 
-  // --- Friend actions ---
+  // friend actions
   async function handleToggleRequest(targetId: string, relation: FriendRelation) {
     try {
       if (relation === 'none') {
         const { error } = await supabase.rpc('request_friend', { target_id: targetId });
         if (error) throw error;
       } else if (relation === 'pending_outgoing') {
-        // cancel outgoing request
-        const { error } = await supabase.rpc('unfriend', { target_id: targetId });
+        const { error } = await supabase.rpc('unfriend', { target_id: targetId }); // cancel
         if (error) throw error;
       } else {
-        return; // pending_incoming/friends handled elsewhere
+        return; // incoming or friends handled elsewhere
       }
       await refreshStatus([targetId]);
     } catch (e) {
@@ -185,23 +180,123 @@ export default function CommunitySearch() {
     });
   }
 
-  return (
-    /* Full-width container with mobile padding so input spans the screen nicely */
-    <div className="w-full px-4 sm:px-6 py-4 max-w-screen-sm mx-auto">
-      <h1 className="text-2xl font-semibold mb-3">Community</h1>
+  // ------- STYLES (inline, no framework needed) -------
+  const S = {
+    container: {
+      width: '100%',
+      maxWidth: 640,           // keeps it comfy on desktop; change if you want wider
+      margin: '0 auto',
+      padding: '16px',         // side padding so input doesn't touch edges on mobile
+      boxSizing: 'border-box' as const,
+    },
+    h1: { fontSize: 22, fontWeight: 600, margin: '0 0 12px 0' },
+    pillsWrap: {
+      display: 'inline-flex',
+      gap: 4,
+      padding: 4,
+      border: '1px solid #e5e7eb',
+      borderRadius: 9999,
+      background: '#fff',
+      marginBottom: 8,
+    },
+    pill: (active: boolean) => ({
+      padding: '6px 12px',
+      borderRadius: 9999,
+      border: 'none',
+      background: active ? '#111827' : 'transparent',
+      color: active ? '#fff' : '#374151',
+      fontSize: 14,
+      cursor: 'pointer',
+    }),
+    row: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 },
+    input: {
+      display: 'block',
+      width: '100%',
+      padding: '10px 12px',
+      border: '1px solid #e5e7eb',
+      borderRadius: 8,
+      boxSizing: 'border-box' as const,
+      fontSize: 14,
+      minWidth: 0,
+    },
+    select: {
+      padding: '10px 10px',
+      border: '1px solid #e5e7eb',
+      borderRadius: 8,
+      fontSize: 12,
+      background: '#fff',
+    },
+    hint: { color: '#6b7280', fontSize: 13 },
+    cardList: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+      gap: 12,
+    },
+    card: {
+      display: 'block',
+      border: '1px solid #e5e7eb',
+      borderRadius: 8,
+      overflow: 'hidden',
+      textDecoration: 'none',
+      color: 'inherit',
+    },
+    image: { width: '100%', height: 144, objectFit: 'cover', background: '#f3f4f6' },
+    cardBody: { padding: 12 },
+    title: { fontWeight: 600, fontSize: 14 },
+    meta: { marginTop: 4, fontSize: 12, color: '#4b5563' },
+    userRow: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      border: '1px solid #e5e7eb',
+      borderRadius: 8,
+      padding: 8,
+      gap: 8,
+    },
+    userLeft: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 },
+    avatar: { width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' as const },
+    name: { fontSize: 14, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' },
+    nickname: { marginLeft: 6, color: '#6b7280', fontSize: 12 },
+    btn: {
+      border: '1px solid #e5e7eb',
+      borderRadius: 6,
+      padding: '6px 8px',
+      background: '#fff',
+      fontSize: 12,
+      cursor: 'pointer',
+    },
+    btnDark: {
+      border: '1px solid #111827',
+      background: '#111827',
+      color: '#fff',
+    },
+    btnDisabled: {
+      opacity: 0.6,
+      cursor: 'default',
+    },
+    pager: { marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+    pagerBtn: {
+      border: '1px solid #e5e7eb',
+      borderRadius: 6,
+      padding: '6px 10px',
+      fontSize: 12,
+      cursor: 'pointer',
+    },
+    pagerBtnDisabled: { opacity: 0.5, cursor: 'default' },
+    pageText: { fontSize: 12, color: '#6b7280' },
+    error: { color: '#dc2626', fontSize: 13 },
+  };
 
-      {/* Segmented tabs above search (compact bottom-tabs look) */}
-      <div
-        role="tablist"
-        aria-label="Search type"
-        className="mb-2 inline-flex rounded-full border bg-white p-1 text-sm"
-      >
+  return (
+    <div style={S.container}>
+      <h1 style={S.h1}>Community</h1>
+
+      {/* Segmented tabs above search */}
+      <div role="tablist" aria-label="Search type" style={S.pillsWrap}>
         <button
           role="tab"
           aria-selected={tab === 'recipes'}
-          className={`px-3 py-1.5 rounded-full transition-colors ${
-            tab === 'recipes' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
-          }`}
+          style={S.pill(tab === 'recipes')}
           onClick={() => setTab('recipes')}
         >
           Recipes
@@ -209,30 +304,28 @@ export default function CommunitySearch() {
         <button
           role="tab"
           aria-selected={tab === 'users'}
-          className={`px-3 py-1.5 rounded-full transition-colors ${
-            tab === 'users' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
-          }`}
+          style={S.pill(tab === 'users')}
           onClick={() => setTab('users')}
         >
           Users
         </button>
       </div>
 
-      {/* Search + (optional) cuisine filter */}
-      <div className="mb-4 flex items-center gap-2">
+      {/* Search row */}
+      <div style={S.row}>
         <input
-          className="block w-full rounded-lg border px-3 py-2"
+          style={S.input}
           placeholder={tab === 'users' ? 'Search people by name or nickname…' : 'Search recipes by title, cuisine, or instructions…'}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
         {tab === 'recipes' && (
           <select
-            className="rounded-lg border px-2 py-2 text-sm"
+            style={{ ...S.select, opacity: queryActive ? 1 : 0.6 }}
             value={cuisineFilter}
             onChange={(e) => setCuisineFilter(e.target.value)}
             aria-label="Filter by cuisine"
-            disabled={!queryActive} // filter only active when searching
+            disabled={!queryActive}
           >
             <option value="">All cuisines</option>
             <option value="Italian">Italian</option>
@@ -245,33 +338,33 @@ export default function CommunitySearch() {
 
       {/* If no query yet, show a gentle prompt and stop here */}
       {!queryActive ? (
-        <div className="text-sm text-gray-500">
+        <div style={S.hint}>
           Start typing above to search {tab === 'users' ? 'for people' : 'for recipes'}.
         </div>
       ) : (
         <>
-          {/* Status/Error */}
-          {loading && <div className="text-sm text-gray-500">Searching…</div>}
-          {!loading && errMsg && <div className="text-sm text-red-600">{errMsg}</div>}
+          {loading && <div style={S.hint}>Searching…</div>}
+          {!loading && errMsg && <div style={S.error}>{errMsg}</div>}
 
-          {/* Users — compact friend-list style */}
+          {/* Users list */}
           {!loading && !errMsg && tab === 'users' && (
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 ? (
-                <div className="text-sm text-gray-500">No users found.</div>
+                <div style={S.hint}>No users found.</div>
               ) : (
                 users.map((p) => {
                   const relation = friendStatus[p.id] ?? 'none';
                   const isMe = myId === p.id;
 
-                  let actionEl: JSX.Element = <span className="text-xs text-gray-500">You</span>;
+                  let actionEl: JSX.Element = <span style={S.hint}>You</span>;
                   if (!isMe) {
                     if (relation === 'none' || relation === 'pending_outgoing') {
                       actionEl = (
                         <button
-                          className={`rounded border px-2 py-1 text-xs ${
-                            relation === 'pending_outgoing' ? 'bg-gray-900 text-white' : ''
-                          }`}
+                          style={{
+                            ...S.btn,
+                            ...(relation === 'pending_outgoing' ? S.btnDark : {}),
+                          }}
                           onClick={() => handleToggleRequest(p.id, relation)}
                           aria-pressed={relation === 'pending_outgoing'}
                           title={relation === 'pending_outgoing' ? 'Tap to cancel request' : 'Add Friend'}
@@ -280,17 +373,16 @@ export default function CommunitySearch() {
                         </button>
                       );
                     } else if (relation === 'pending_incoming') {
-                      // requested YOU — show as Requested (read-only on search page)
                       actionEl = (
-                        <button className="rounded border px-2 py-1 text-xs opacity-60 cursor-default" disabled>
+                        <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
                           Requested
                         </button>
                       );
                     } else {
-                      // friends → tap to unfriend
+                      // friends
                       actionEl = (
                         <button
-                          className="rounded border px-2 py-1 text-xs"
+                          style={S.btn}
                           onClick={() => handleUnfriend(p.id)}
                           title="Unfriend"
                         >
@@ -301,18 +393,18 @@ export default function CommunitySearch() {
                   }
 
                   return (
-                    <div key={p.id} className="flex items-center justify-between rounded border p-2">
-                      <Link href={`/profiles/${p.id}`} className="flex items-center gap-2 min-w-0">
+                    <div key={p.id} style={S.userRow}>
+                      <Link href={`/profiles/${p.id}`} style={S.userLeft}>
                         {/* tiny avatar 24x24 */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={p.avatar_url ?? '/avatar-placeholder.png'}
                           alt={p.display_name ?? 'user'}
-                          className="h-6 w-6 rounded-full object-cover"
+                          style={S.avatar}
                         />
-                        <div className="truncate text-sm">
-                          <span className="truncate">{p.display_name ?? 'Unknown'}</span>
-                          {p.nickname ? <span className="ml-1 text-gray-500">({p.nickname})</span> : null}
+                        <div style={{ minWidth: 0 }}>
+                          <span style={S.name}>{p.display_name ?? 'Unknown'}</span>
+                          {p.nickname ? <span style={S.nickname}>({p.nickname})</span> : null}
                         </div>
                       </Link>
                       {actionEl}
@@ -323,33 +415,25 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Recipes — card grid */}
+          {/* Recipes grid */}
           {!loading && !errMsg && tab === 'recipes' && (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div style={S.cardList}>
               {recipes.length === 0 ? (
-                <div className="text-sm text-gray-500">No recipes found.</div>
+                <div style={S.hint}>No recipes found.</div>
               ) : (
                 recipes.map((r) => (
-                  <Link
-                    key={r.id}
-                    href={`/recipes/${r.id}`}
-                    className="block rounded border overflow-hidden hover:shadow"
-                  >
+                  <Link key={r.id} href={`/recipes/${r.id}`} style={S.card}>
                     {r.photo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={r.photo_url} alt={r.title} className="h-36 w-full object-cover" />
+                      <img src={r.photo_url} alt={r.title} style={S.image} />
                     ) : (
-                      <div className="h-36 w-full bg-gray-100" />
+                      <div style={S.image} />
                     )}
-                    <div className="p-3">
-                      <div className="font-medium">{r.title}</div>
-                      <div className="mt-1 text-xs text-gray-600">
+                    <div style={S.cardBody}>
+                      <div style={S.title}>{r.title}</div>
+                      <div style={S.meta}>
                         {r.cuisine ?? '—'}
-                        {r.visibility !== 'public' && (
-                          <span className="ml-2 rounded bg-gray-200 px-1 py-0.5 text-[10px] uppercase tracking-wide">
-                            {r.visibility}
-                          </span>
-                        )}
+                        {r.visibility !== 'public' ? ` • ${String(r.visibility).toUpperCase()}` : ''}
                       </div>
                     </div>
                   </Link>
@@ -360,17 +444,17 @@ export default function CommunitySearch() {
 
           {/* Pager */}
           {!loading && (users.length > 0 || recipes.length > 0) && (
-            <div className="mt-4 flex items-center justify-between">
+            <div style={S.pager}>
               <button
-                className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                style={{ ...S.pagerBtn, ...(page === 0 ? S.pagerBtnDisabled : {}) }}
                 disabled={page === 0}
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
               >
                 Previous
               </button>
-              <div className="text-xs text-gray-500">Page {page + 1}</div>
+              <div style={S.pageText}>Page {page + 1}</div>
               <button
-                className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                style={{ ...S.pagerBtn, ...(!hasMore ? S.pagerBtnDisabled : {}) }}
                 disabled={!hasMore}
                 onClick={() => setPage((p) => p + 1)}
               >
@@ -384,7 +468,6 @@ export default function CommunitySearch() {
   );
 }
 
-/** debounce helper */
 function useDebounce<T>(value: T, delay = 300) {
   const [v, setV] = useState(value);
   useEffect(() => {
