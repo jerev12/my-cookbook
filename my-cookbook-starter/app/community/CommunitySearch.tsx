@@ -32,6 +32,7 @@ export default function CommunitySearch() {
   // search + filters
   const [q, setQ] = useState('');
   const debouncedQ = useDebounce(q, 300);
+  const queryActive = debouncedQ.trim().length > 0; // 👈 only search after typing
   const [cuisineFilter, setCuisineFilter] = useState<string>('');
 
   // paging
@@ -63,11 +64,20 @@ export default function CommunitySearch() {
     setPage(0);
   }, [tab, debouncedQ, cuisineFilter]);
 
-  // fetch on change
+  // fetch when deps change, but only after user typed something
   useEffect(() => {
+    if (!queryActive) {
+      // clear lists when there is no query
+      setUsers([]);
+      setRecipes([]);
+      setHasMore(false);
+      setErrMsg(null);
+      setLoading(false);
+      return;
+    }
     void fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, debouncedQ, page, cuisineFilter, myId]);
+  }, [tab, debouncedQ, page, cuisineFilter, myId, queryActive]);
 
   async function fetchData() {
     setLoading(true);
@@ -145,7 +155,7 @@ export default function CommunitySearch() {
         const { error } = await supabase.rpc('unfriend', { target_id: targetId });
         if (error) throw error;
       } else {
-        return; // no-op for other states
+        return; // pending_incoming/friends handled elsewhere
       }
       await refreshStatus([targetId]);
     } catch (e) {
@@ -176,10 +186,11 @@ export default function CommunitySearch() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 sm:px-4 py-4">
+    /* Full-width container with mobile padding so input spans the screen nicely */
+    <div className="w-full px-4 sm:px-6 py-4 max-w-screen-sm mx-auto">
       <h1 className="text-2xl font-semibold mb-3">Community</h1>
 
-      {/* Segmented tabs above search */}
+      {/* Segmented tabs above search (compact bottom-tabs look) */}
       <div
         role="tablist"
         aria-label="Search type"
@@ -210,7 +221,7 @@ export default function CommunitySearch() {
       {/* Search + (optional) cuisine filter */}
       <div className="mb-4 flex items-center gap-2">
         <input
-          className="w-full rounded-lg border px-3 py-2"
+          className="block w-full rounded-lg border px-3 py-2"
           placeholder={tab === 'users' ? 'Search people by name or nickname…' : 'Search recipes by title, cuisine, or instructions…'}
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -221,6 +232,7 @@ export default function CommunitySearch() {
             value={cuisineFilter}
             onChange={(e) => setCuisineFilter(e.target.value)}
             aria-label="Filter by cuisine"
+            disabled={!queryActive} // filter only active when searching
           >
             <option value="">All cuisines</option>
             <option value="Italian">Italian</option>
@@ -231,133 +243,143 @@ export default function CommunitySearch() {
         )}
       </div>
 
-      {/* Status/Error */}
-      {loading && <div className="text-sm text-gray-500">Searching…</div>}
-      {!loading && errMsg && <div className="text-sm text-red-600">{errMsg}</div>}
+      {/* If no query yet, show a gentle prompt and stop here */}
+      {!queryActive ? (
+        <div className="text-sm text-gray-500">
+          Start typing above to search {tab === 'users' ? 'for people' : 'for recipes'}.
+        </div>
+      ) : (
+        <>
+          {/* Status/Error */}
+          {loading && <div className="text-sm text-gray-500">Searching…</div>}
+          {!loading && errMsg && <div className="text-sm text-red-600">{errMsg}</div>}
 
-      {/* Users — compact friend-list style */}
-      {!loading && !errMsg && tab === 'users' && (
-        <div className="space-y-2">
-          {users.length === 0 ? (
-            <div className="text-sm text-gray-500">No users found.</div>
-          ) : (
-            users.map((p) => {
-              const relation = friendStatus[p.id] ?? 'none';
-              const isMe = myId === p.id;
+          {/* Users — compact friend-list style */}
+          {!loading && !errMsg && tab === 'users' && (
+            <div className="space-y-2">
+              {users.length === 0 ? (
+                <div className="text-sm text-gray-500">No users found.</div>
+              ) : (
+                users.map((p) => {
+                  const relation = friendStatus[p.id] ?? 'none';
+                  const isMe = myId === p.id;
 
-              // decide button
-              let actionEl: JSX.Element = <span className="text-xs text-gray-500">You</span>;
-              if (!isMe) {
-                if (relation === 'none' || relation === 'pending_outgoing') {
-                  actionEl = (
-                    <button
-                      className={`rounded border px-2 py-1 text-xs ${
-                        relation === 'pending_outgoing' ? 'bg-gray-900 text-white' : ''
-                      }`}
-                      onClick={() => handleToggleRequest(p.id, relation)}
-                      aria-pressed={relation === 'pending_outgoing'}
-                      title={relation === 'pending_outgoing' ? 'Tap to cancel request' : 'Add Friend'}
-                    >
-                      {relation === 'pending_outgoing' ? 'Requested' : 'Add Friend'}
-                    </button>
-                  );
-                } else if (relation === 'pending_incoming') {
-                  // show Requested but disabled (no accept/decline here)
-                  actionEl = (
-                    <button className="rounded border px-2 py-1 text-xs opacity-60 cursor-default" disabled>
-                      Requested
-                    </button>
-                  );
-                } else {
-                  // friends → allow unfriending
-                  actionEl = (
-                    <button
-                      className="rounded border px-2 py-1 text-xs"
-                      onClick={() => handleUnfriend(p.id)}
-                      title="Unfriend"
-                    >
-                      Friend
-                    </button>
-                  );
-                }
-              }
+                  let actionEl: JSX.Element = <span className="text-xs text-gray-500">You</span>;
+                  if (!isMe) {
+                    if (relation === 'none' || relation === 'pending_outgoing') {
+                      actionEl = (
+                        <button
+                          className={`rounded border px-2 py-1 text-xs ${
+                            relation === 'pending_outgoing' ? 'bg-gray-900 text-white' : ''
+                          }`}
+                          onClick={() => handleToggleRequest(p.id, relation)}
+                          aria-pressed={relation === 'pending_outgoing'}
+                          title={relation === 'pending_outgoing' ? 'Tap to cancel request' : 'Add Friend'}
+                        >
+                          {relation === 'pending_outgoing' ? 'Requested' : 'Add Friend'}
+                        </button>
+                      );
+                    } else if (relation === 'pending_incoming') {
+                      // requested YOU — show as Requested (read-only on search page)
+                      actionEl = (
+                        <button className="rounded border px-2 py-1 text-xs opacity-60 cursor-default" disabled>
+                          Requested
+                        </button>
+                      );
+                    } else {
+                      // friends → tap to unfriend
+                      actionEl = (
+                        <button
+                          className="rounded border px-2 py-1 text-xs"
+                          onClick={() => handleUnfriend(p.id)}
+                          title="Unfriend"
+                        >
+                          Friend
+                        </button>
+                      );
+                    }
+                  }
 
-              return (
-                <div key={p.id} className="flex items-center justify-between rounded border p-2">
-                  <Link href={`/profiles/${p.id}`} className="flex items-center gap-2 min-w-0">
-                    {/* tiny avatar 24x24 */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={p.avatar_url ?? '/avatar-placeholder.png'}
-                      alt={p.display_name ?? 'user'}
-                      className="h-6 w-6 rounded-full object-cover"
-                    />
-                    <div className="truncate text-sm">
-                      <span className="truncate">{p.display_name ?? 'Unknown'}</span>
-                      {p.nickname ? <span className="ml-1 text-gray-500">({p.nickname})</span> : null}
+                  return (
+                    <div key={p.id} className="flex items-center justify-between rounded border p-2">
+                      <Link href={`/profiles/${p.id}`} className="flex items-center gap-2 min-w-0">
+                        {/* tiny avatar 24x24 */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={p.avatar_url ?? '/avatar-placeholder.png'}
+                          alt={p.display_name ?? 'user'}
+                          className="h-6 w-6 rounded-full object-cover"
+                        />
+                        <div className="truncate text-sm">
+                          <span className="truncate">{p.display_name ?? 'Unknown'}</span>
+                          {p.nickname ? <span className="ml-1 text-gray-500">({p.nickname})</span> : null}
+                        </div>
+                      </Link>
+                      {actionEl}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* Recipes — card grid */}
+          {!loading && !errMsg && tab === 'recipes' && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {recipes.length === 0 ? (
+                <div className="text-sm text-gray-500">No recipes found.</div>
+              ) : (
+                recipes.map((r) => (
+                  <Link
+                    key={r.id}
+                    href={`/recipes/${r.id}`}
+                    className="block rounded border overflow-hidden hover:shadow"
+                  >
+                    {r.photo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={r.photo_url} alt={r.title} className="h-36 w-full object-cover" />
+                    ) : (
+                      <div className="h-36 w-full bg-gray-100" />
+                    )}
+                    <div className="p-3">
+                      <div className="font-medium">{r.title}</div>
+                      <div className="mt-1 text-xs text-gray-600">
+                        {r.cuisine ?? '—'}
+                        {r.visibility !== 'public' && (
+                          <span className="ml-2 rounded bg-gray-200 px-1 py-0.5 text-[10px] uppercase tracking-wide">
+                            {r.visibility}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </Link>
-                  {actionEl}
-                </div>
-              );
-            })
+                ))
+              )}
+            </div>
           )}
-        </div>
-      )}
 
-      {/* Recipes — card grid */}
-      {!loading && !errMsg && tab === 'recipes' && (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {recipes.length === 0 ? (
-            <div className="text-sm text-gray-500">No recipes found.</div>
-          ) : (
-            recipes.map((r) => (
-              <Link
-                key={r.id}
-                href={`/recipes/${r.id}`}
-                className="block rounded border overflow-hidden hover:shadow"
+          {/* Pager */}
+          {!loading && (users.length > 0 || recipes.length > 0) && (
+            <div className="mt-4 flex items-center justify-between">
+              <button
+                className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                disabled={page === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
               >
-                {r.photo_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={r.photo_url} alt={r.title} className="h-36 w-full object-cover" />
-                ) : (
-                  <div className="h-36 w-full bg-gray-100" />
-                )}
-                <div className="p-3">
-                  <div className="font-medium">{r.title}</div>
-                  <div className="mt-1 text-xs text-gray-600">
-                    {r.cuisine ?? '—'}
-                    {r.visibility !== 'public' && (
-                      <span className="ml-2 rounded bg-gray-200 px-1 py-0.5 text-[10px] uppercase tracking-wide">
-                        {r.visibility}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </Link>
-            ))
+                Previous
+              </button>
+              <div className="text-xs text-gray-500">Page {page + 1}</div>
+              <button
+                className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                disabled={!hasMore}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </button>
+            </div>
           )}
-        </div>
+        </>
       )}
-
-      {/* Pager */}
-      <div className="mt-4 flex items-center justify-between">
-        <button
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
-          disabled={page === 0}
-          onClick={() => setPage((p) => Math.max(0, p - 1))}
-        >
-          Previous
-        </button>
-        <div className="text-xs text-gray-500">Page {page + 1}</div>
-        <button
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
-          disabled={!hasMore}
-          onClick={() => setPage((p) => p + 1)}
-        >
-          Next
-        </button>
-      </div>
     </div>
   );
 }
