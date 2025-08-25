@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -150,7 +150,7 @@ export default function CommunitySearch() {
         const { error } = await supabase.rpc('unfriend', { target_id: targetId }); // cancel
         if (error) throw error;
       } else {
-        return; // incoming or friends handled elsewhere
+        return; // pending_incoming/friends handled elsewhere
       }
       await refreshStatus([targetId]);
     } catch (e) {
@@ -180,16 +180,16 @@ export default function CommunitySearch() {
     });
   }
 
-  // ------- STYLES (inline, no framework needed) -------
+  // ------- STYLES (inline, typed with CSSProperties) -------
   const S = {
     container: {
       width: '100%',
-      maxWidth: 640,           // keeps it comfy on desktop; change if you want wider
+      maxWidth: 640, // comfy on desktop; adjust if you want wider
       margin: '0 auto',
-      padding: '16px',         // side padding so input doesn't touch edges on mobile
+      padding: '16px', // side padding so input doesn't touch edges on mobile
       boxSizing: 'border-box' as const,
     },
-    h1: { fontSize: 22, fontWeight: 600, margin: '0 0 12px 0' },
+    h1: { fontSize: 22, fontWeight: 600, margin: '0 0 12px 0' } as CSSProperties,
     pillsWrap: {
       display: 'inline-flex',
       gap: 4,
@@ -198,8 +198,8 @@ export default function CommunitySearch() {
       borderRadius: 9999,
       background: '#fff',
       marginBottom: 8,
-    },
-    pill: (active: boolean) => ({
+    } as CSSProperties,
+    pill: (active: boolean): CSSProperties => ({
       padding: '6px 12px',
       borderRadius: 9999,
       border: 'none',
@@ -208,30 +208,30 @@ export default function CommunitySearch() {
       fontSize: 14,
       cursor: 'pointer',
     }),
-    row: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 },
+    row: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 } as CSSProperties,
     input: {
       display: 'block',
       width: '100%',
       padding: '10px 12px',
       border: '1px solid #e5e7eb',
       borderRadius: 8,
-      boxSizing: 'border-box' as const,
+      boxSizing: 'border-box',
       fontSize: 14,
       minWidth: 0,
-    },
+    } as CSSProperties,
     select: {
       padding: '10px 10px',
       border: '1px solid #e5e7eb',
       borderRadius: 8,
       fontSize: 12,
       background: '#fff',
-    },
-    hint: { color: '#6b7280', fontSize: 13 },
+    } as CSSProperties,
+    hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
     cardList: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
       gap: 12,
-    },
+    } as CSSProperties,
     card: {
       display: 'block',
       border: '1px solid #e5e7eb',
@@ -239,11 +239,16 @@ export default function CommunitySearch() {
       overflow: 'hidden',
       textDecoration: 'none',
       color: 'inherit',
-    },
-    image: { width: '100%', height: 144, objectFit: 'cover', background: '#f3f4f6' },
-    cardBody: { padding: 12 },
-    title: { fontWeight: 600, fontSize: 14 },
-    meta: { marginTop: 4, fontSize: 12, color: '#4b5563' },
+    } as CSSProperties,
+    image: {
+      width: '100%',
+      height: 144,
+      objectFit: 'cover',
+      background: '#f3f4f6',
+    } as CSSProperties,
+    cardBody: { padding: 12 } as CSSProperties,
+    title: { fontWeight: 600, fontSize: 14 } as CSSProperties,
+    meta: { marginTop: 4, fontSize: 12, color: '#4b5563' } as CSSProperties,
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -252,11 +257,16 @@ export default function CommunitySearch() {
       borderRadius: 8,
       padding: 8,
       gap: 8,
-    },
-    userLeft: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 },
-    avatar: { width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' as const },
-    name: { fontSize: 14, whiteSpace: 'nowrap' as const, overflow: 'hidden', textOverflow: 'ellipsis' },
-    nickname: { marginLeft: 6, color: '#6b7280', fontSize: 12 },
+    } as CSSProperties,
+    userLeft: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } as CSSProperties,
+    avatar: { width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
+    name: {
+      fontSize: 14,
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    } as CSSProperties,
+    nickname: { marginLeft: 6, color: '#6b7280', fontSize: 12 } as CSSProperties,
     btn: {
       border: '1px solid #e5e7eb',
       borderRadius: 6,
@@ -264,27 +274,27 @@ export default function CommunitySearch() {
       background: '#fff',
       fontSize: 12,
       cursor: 'pointer',
-    },
+    } as CSSProperties,
     btnDark: {
       border: '1px solid #111827',
       background: '#111827',
       color: '#fff',
-    },
+    } as CSSProperties,
     btnDisabled: {
       opacity: 0.6,
       cursor: 'default',
-    },
-    pager: { marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+    } as CSSProperties,
+    pager: { marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' } as CSSProperties,
     pagerBtn: {
       border: '1px solid #e5e7eb',
       borderRadius: 6,
       padding: '6px 10px',
       fontSize: 12,
       cursor: 'pointer',
-    },
-    pagerBtnDisabled: { opacity: 0.5, cursor: 'default' },
-    pageText: { fontSize: 12, color: '#6b7280' },
-    error: { color: '#dc2626', fontSize: 13 },
+    } as CSSProperties,
+    pagerBtnDisabled: { opacity: 0.5, cursor: 'default' } as CSSProperties,
+    pageText: { fontSize: 12, color: '#6b7280' } as CSSProperties,
+    error: { color: '#dc2626', fontSize: 13 } as CSSProperties,
   };
 
   return (
