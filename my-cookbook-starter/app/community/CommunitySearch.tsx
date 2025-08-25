@@ -259,7 +259,7 @@ export default function CommunitySearch() {
       gap: 8,
     } as CSSProperties,
     userLeft: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } as CSSProperties,
-    avatar: { width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
+    avatar: { width: 36, height: 36, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
     name: {
       fontSize: 14,
       whiteSpace: 'nowrap',
@@ -405,7 +405,7 @@ export default function CommunitySearch() {
                   return (
                     <div key={p.id} style={S.userRow}>
                       <Link href={`/profiles/${p.id}`} style={S.userLeft}>
-                        {/* tiny avatar 24x24 */}
+                        {/* tiny avatar 36x36 */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={p.avatar_url ?? '/avatar-placeholder.png'}
@@ -414,7 +414,6 @@ export default function CommunitySearch() {
                         />
                         <div style={{ minWidth: 0 }}>
                           <span style={S.name}>{p.display_name ?? 'Unknown'}</span>
-                          {p.nickname ? <span style={S.nickname}>({p.nickname})</span> : null}
                         </div>
                       </Link>
                       {actionEl}
