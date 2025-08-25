@@ -17,13 +17,12 @@ type RecipeRow = {
   id: string;
   title: string;
   cuisine: string | null;
-  visibility: 'public' | 'friends' | 'private' | string; // rpc returns text
-  user_id: string; // author id
+  visibility: 'public' | 'friends' | 'private' | string;
+  user_id: string;
+  photo_url: string | null;
 };
 
-type RecipeUI = RecipeRow & {
-  author: Pick<Profile, 'id' | 'display_name' | 'nickname' | 'avatar_url'> | null;
-};
+type FriendRelation = 'none' | 'pending_outgoing' | 'pending_incoming' | 'friends';
 
 const PAGE_SIZE = 20;
 
@@ -42,22 +41,33 @@ export default function CommunitySearch() {
   // data
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<Profile[]>([]);
-  const [recipes, setRecipes] = useState<RecipeUI[]>([]);
+  const [recipes, setRecipes] = useState<RecipeRow[]>([]);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  // cancel in‑flight requests on rapid changes
+  // me
+  const [myId, setMyId] = useState<string | null>(null);
+  const [friendStatus, setFriendStatus] = useState<Record<string, FriendRelation>>({});
+
   const abortRef = useRef<AbortController | null>(null);
+
+  // get current user id
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      setMyId(data.user?.id ?? null);
+    })();
+  }, []);
 
   // reset page when inputs change
   useEffect(() => {
     setPage(0);
   }, [tab, debouncedQ, cuisineFilter]);
 
-  // fetch when dependencies change
+  // fetch on change
   useEffect(() => {
     void fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, debouncedQ, page, cuisineFilter]);
+  }, [tab, debouncedQ, page, cuisineFilter, myId]);
 
   async function fetchData() {
     setLoading(true);
@@ -81,9 +91,27 @@ export default function CommunitySearch() {
         const rows = (data as Profile[]) ?? [];
         setUsers(rows);
         setHasMore(rows.length === PAGE_SIZE);
-        setRecipes([]); // clear other tab
+
+        // batch fetch friendship statuses
+        if (rows.length > 0) {
+          const ids = rows.map(u => u.id);
+          const { data: statuses, error: sErr } = await supabase.rpc('get_friend_statuses', {
+            target_ids: ids,
+          } as any);
+          if (sErr) throw sErr;
+
+          const map: Record<string, FriendRelation> = {};
+          (statuses ?? []).forEach((r: { target_id: string; relation: FriendRelation }) => {
+            map[r.target_id] = r.relation;
+          });
+          setFriendStatus(map);
+        } else {
+          setFriendStatus({});
+        }
+
+        setRecipes([]);
       } else {
-        // RECIPES
+        // RECIPES (includes your own; RLS controls visibility)
         const { data, error } = await supabase.rpc('search_recipes', {
           q: debouncedQ || null,
           limit_count: PAGE_SIZE,
@@ -93,30 +121,10 @@ export default function CommunitySearch() {
         if (error) throw error;
 
         const rows = (data as RecipeRow[]) ?? [];
-        if (rows.length === 0) {
-          setRecipes([]);
-          setHasMore(false);
-          setUsers([]);
-          return;
-        }
-
-        // hydrate authors in one go
-        const authorIds = Array.from(new Set(rows.map(r => r.user_id)));
-        const { data: authors, error: aErr } = await supabase
-          .from('profiles')
-          .select('id, display_name, nickname, avatar_url')
-          .in('id', authorIds);
-        if (aErr) throw aErr;
-
-        const byId = new Map<string, Profile>((authors ?? []).map(a => [a.id, a as Profile]));
-        const cooked: RecipeUI[] = rows.map(r => ({
-          ...r,
-          author: byId.get(r.user_id) ?? null,
-        }));
-
-        setRecipes(cooked);
-        setHasMore(cooked.length === PAGE_SIZE);
-        setUsers([]); // clear other tab
+        setRecipes(rows);
+        setHasMore(rows.length === PAGE_SIZE);
+        setUsers([]);
+        setFriendStatus({});
       }
     } catch (err: any) {
       console.error(err);
@@ -126,43 +134,95 @@ export default function CommunitySearch() {
     }
   }
 
-  return (
-    <div className="mx-auto max-w-3xl p-4">
-      <h1 className="text-2xl font-semibold mb-4">Community</h1>
+  // --- Friend actions ---
+  async function handleToggleRequest(targetId: string, relation: FriendRelation) {
+    try {
+      if (relation === 'none') {
+        const { error } = await supabase.rpc('request_friend', { target_id: targetId });
+        if (error) throw error;
+      } else if (relation === 'pending_outgoing') {
+        // cancel outgoing request
+        const { error } = await supabase.rpc('unfriend', { target_id: targetId });
+        if (error) throw error;
+      } else {
+        return; // no-op for other states
+      }
+      await refreshStatus([targetId]);
+    } catch (e) {
+      console.error(e);
+    }
+  }
 
-      {/* Tabs */}
-      <div className="mb-3 flex gap-2">
+  async function handleUnfriend(targetId: string) {
+    try {
+      const { error } = await supabase.rpc('unfriend', { target_id: targetId });
+      if (error) throw error;
+      await refreshStatus([targetId]);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function refreshStatus(ids: string[]) {
+    const { data: statuses, error } = await supabase.rpc('get_friend_statuses', { target_ids: ids } as any);
+    if (error) return;
+    setFriendStatus(prev => {
+      const copy = { ...prev };
+      (statuses ?? []).forEach((r: { target_id: string; relation: FriendRelation }) => {
+        copy[r.target_id] = r.relation;
+      });
+      return copy;
+    });
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-3xl px-3 sm:px-4 py-4">
+      <h1 className="text-2xl font-semibold mb-3">Community</h1>
+
+      {/* Segmented tabs above search */}
+      <div
+        role="tablist"
+        aria-label="Search type"
+        className="mb-2 inline-flex rounded-full border bg-white p-1 text-sm"
+      >
         <button
-          className={`px-3 py-1 rounded ${tab === 'recipes' ? 'bg-black text-white' : 'bg-gray-200'}`}
+          role="tab"
+          aria-selected={tab === 'recipes'}
+          className={`px-3 py-1.5 rounded-full transition-colors ${
+            tab === 'recipes' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+          }`}
           onClick={() => setTab('recipes')}
         >
           Recipes
         </button>
         <button
-          className={`px-3 py-1 rounded ${tab === 'users' ? 'bg-black text-white' : 'bg-gray-200'}`}
+          role="tab"
+          aria-selected={tab === 'users'}
+          className={`px-3 py-1.5 rounded-full transition-colors ${
+            tab === 'users' ? 'bg-gray-900 text-white' : 'text-gray-700 hover:bg-gray-100'
+          }`}
           onClick={() => setTab('users')}
         >
           Users
         </button>
       </div>
 
-      {/* Search + filter */}
+      {/* Search + (optional) cuisine filter */}
       <div className="mb-4 flex items-center gap-2">
         <input
-          className="w-full rounded border px-3 py-2"
+          className="w-full rounded-lg border px-3 py-2"
           placeholder={tab === 'users' ? 'Search people by name or nickname…' : 'Search recipes by title, cuisine, or instructions…'}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
         {tab === 'recipes' && (
           <select
-            className="rounded border px-2 py-2 text-sm"
+            className="rounded-lg border px-2 py-2 text-sm"
             value={cuisineFilter}
             onChange={(e) => setCuisineFilter(e.target.value)}
             aria-label="Filter by cuisine"
           >
             <option value="">All cuisines</option>
-            {/* Optional: replace with dynamic list from your DB */}
             <option value="Italian">Italian</option>
             <option value="Mexican">Mexican</option>
             <option value="Indian">Indian</option>
@@ -175,60 +235,98 @@ export default function CommunitySearch() {
       {loading && <div className="text-sm text-gray-500">Searching…</div>}
       {!loading && errMsg && <div className="text-sm text-red-600">{errMsg}</div>}
 
-      {/* Users */}
+      {/* Users — compact friend-list style */}
       {!loading && !errMsg && tab === 'users' && (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {users.length === 0 ? (
             <div className="text-sm text-gray-500">No users found.</div>
           ) : (
-            users.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 rounded border p-3">
-                <Link href={`/profiles/${p.id}`} className="flex items-center gap-3 flex-1 min-w-0">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={p.avatar_url ?? '/avatar-placeholder.png'}
-                    alt={p.display_name ?? 'user'}
-                    className="h-10 w-10 rounded-full object-cover"
-                  />
-                  <div className="truncate">
-                    <div className="font-medium truncate">
-                      {p.display_name ?? 'Unknown'}
-                      {p.nickname ? <span className="ml-2 text-xs text-gray-500">({p.nickname})</span> : null}
+            users.map((p) => {
+              const relation = friendStatus[p.id] ?? 'none';
+              const isMe = myId === p.id;
+
+              // decide button
+              let actionEl: JSX.Element = <span className="text-xs text-gray-500">You</span>;
+              if (!isMe) {
+                if (relation === 'none' || relation === 'pending_outgoing') {
+                  actionEl = (
+                    <button
+                      className={`rounded border px-2 py-1 text-xs ${
+                        relation === 'pending_outgoing' ? 'bg-gray-900 text-white' : ''
+                      }`}
+                      onClick={() => handleToggleRequest(p.id, relation)}
+                      aria-pressed={relation === 'pending_outgoing'}
+                      title={relation === 'pending_outgoing' ? 'Tap to cancel request' : 'Add Friend'}
+                    >
+                      {relation === 'pending_outgoing' ? 'Requested' : 'Add Friend'}
+                    </button>
+                  );
+                } else if (relation === 'pending_incoming') {
+                  // show Requested but disabled (no accept/decline here)
+                  actionEl = (
+                    <button className="rounded border px-2 py-1 text-xs opacity-60 cursor-default" disabled>
+                      Requested
+                    </button>
+                  );
+                } else {
+                  // friends → allow unfriending
+                  actionEl = (
+                    <button
+                      className="rounded border px-2 py-1 text-xs"
+                      onClick={() => handleUnfriend(p.id)}
+                      title="Unfriend"
+                    >
+                      Friend
+                    </button>
+                  );
+                }
+              }
+
+              return (
+                <div key={p.id} className="flex items-center justify-between rounded border p-2">
+                  <Link href={`/profiles/${p.id}`} className="flex items-center gap-2 min-w-0">
+                    {/* tiny avatar 24x24 */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.avatar_url ?? '/avatar-placeholder.png'}
+                      alt={p.display_name ?? 'user'}
+                      className="h-6 w-6 rounded-full object-cover"
+                    />
+                    <div className="truncate text-sm">
+                      <span className="truncate">{p.display_name ?? 'Unknown'}</span>
+                      {p.nickname ? <span className="ml-1 text-gray-500">({p.nickname})</span> : null}
                     </div>
-                  </div>
-                </Link>
-                {/* Keep actions outside the link */}
-                <button className="rounded border px-3 py-1 text-sm">Add Friend</button>
-              </div>
-            ))
+                  </Link>
+                  {actionEl}
+                </div>
+              );
+            })
           )}
         </div>
       )}
 
-      {/* Recipes */}
+      {/* Recipes — card grid */}
       {!loading && !errMsg && tab === 'recipes' && (
-        <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           {recipes.length === 0 ? (
             <div className="text-sm text-gray-500">No recipes found.</div>
           ) : (
             recipes.map((r) => (
-              <div key={r.id} className="rounded border p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <Link href={`/recipes/${r.id}`} className="font-medium hover:underline">
-                    {r.title}
-                  </Link>
-                  <span className="text-xs rounded bg-gray-100 px-2 py-0.5">{r.cuisine ?? '—'}</span>
-                </div>
-                <div className="mt-2 flex items-center gap-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={r.author?.avatar_url ?? '/avatar-placeholder.png'}
-                    alt={r.author?.display_name ?? 'author'}
-                    className="h-6 w-6 rounded-full object-cover"
-                  />
-                  <div className="text-xs text-gray-600">
-                    by {r.author?.display_name ?? 'Unknown'}
-                    {r.author?.nickname ? <span className="ml-1 text-[11px] text-gray-500">({r.author.nickname})</span> : null}
+              <Link
+                key={r.id}
+                href={`/recipes/${r.id}`}
+                className="block rounded border overflow-hidden hover:shadow"
+              >
+                {r.photo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={r.photo_url} alt={r.title} className="h-36 w-full object-cover" />
+                ) : (
+                  <div className="h-36 w-full bg-gray-100" />
+                )}
+                <div className="p-3">
+                  <div className="font-medium">{r.title}</div>
+                  <div className="mt-1 text-xs text-gray-600">
+                    {r.cuisine ?? '—'}
                     {r.visibility !== 'public' && (
                       <span className="ml-2 rounded bg-gray-200 px-1 py-0.5 text-[10px] uppercase tracking-wide">
                         {r.visibility}
@@ -236,7 +334,7 @@ export default function CommunitySearch() {
                     )}
                   </div>
                 </div>
-              </div>
+              </Link>
             ))
           )}
         </div>
@@ -264,7 +362,7 @@ export default function CommunitySearch() {
   );
 }
 
-/** Small debounce helper to avoid spamming the DB */
+/** debounce helper */
 function useDebounce<T>(value: T, delay = 300) {
   const [v, setV] = useState(value);
   useEffect(() => {
