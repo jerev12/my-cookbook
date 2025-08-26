@@ -194,3 +194,4 @@ return (
     {content}
   </main>
 );
+}
