@@ -378,41 +378,44 @@ async function handleToggleRequest(targetId: string, relation: FriendRelation) {
                   const relation = friendStatus[p.id] ?? 'none';
                   const isMe = myId === p.id;
 
-                  let actionEl: JSX.Element = <span style={S.hint}>You</span>;
-                  if (!isMe) {
-                    if (relation === 'none' || relation === 'pending_outgoing') {
-                      actionEl = (
-                        <button
-                          style={{
-                            ...S.btn,
-                            ...(relation === 'pending_outgoing' ? S.btnDark : {}),
-                          }}
-                          onClick={() => handleToggleRequest(p.id, relation)}
-                          aria-pressed={relation === 'pending_outgoing'}
-                          title={relation === 'pending_outgoing' ? 'Tap to cancel request' : 'Add Friend'}
-                        >
-                          {relation === 'pending_outgoing' ? 'Requested' : 'Add Friend'}
-                        </button>
-                      );
-                    } else if (relation === 'pending_incoming') {
-                      actionEl = (
-                        <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
-                          Requested
-                        </button>
-                      );
-                    } else {
-                      // friends
-                      actionEl = (
-                        <button
-                          style={S.btn}
-                          onClick={() => handleUnfriend(p.id)}
-                          title="Unfriend"
-                        >
-                          Friend
-                        </button>
-                      );
-                    }
-                  }
+     let actionEl: JSX.Element = <span style={S.hint}>You</span>;
+if (!isMe) {
+  if (relation === 'none' || relation === 'pending_outgoing') {
+    // Add or cancel outgoing request (toggle)
+    actionEl = (
+      <button
+        style={{
+          ...S.btn,
+          ...(relation === 'pending_outgoing' ? S.btnDark : {}),
+          cursor: 'pointer',
+        }}
+        onClick={() => handleToggleRequest(p.id, relation)}
+        aria-pressed={relation === 'pending_outgoing'}
+        title={relation === 'pending_outgoing' ? 'Tap to cancel request' : 'Add Friend'}
+      >
+        {relation === 'pending_outgoing' ? 'Requested' : 'Add Friend'}
+      </button>
+    );
+  } else if (relation === 'pending_incoming') {
+    // Someone sent YOU a request → read-only here
+    actionEl = (
+      <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
+        Requested
+      </button>
+    );
+  } else {
+    // relation === 'friends' → allow unfriending
+    actionEl = (
+      <button
+        style={{ ...S.btn, cursor: 'pointer' }}
+        onClick={() => handleUnfriend(p.id)}
+        title="Unfriend"
+      >
+        Friend
+      </button>
+    );
+  }
+}
 
                   return (
                     <div key={p.id} style={S.userRow}>
