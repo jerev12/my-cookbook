@@ -141,22 +141,34 @@ export default function CommunitySearch() {
   }
 
   // friend actions
-  async function handleToggleRequest(targetId: string, relation: FriendRelation) {
-    try {
-      if (relation === 'none') {
-        const { error } = await supabase.rpc('request_friend', { target_id: targetId });
-        if (error) throw error;
-      } else if (relation === 'pending_outgoing') {
-        const { error } = await supabase.rpc('unfriend', { target_id: targetId }); // cancel
-        if (error) throw error;
-      } else {
-        return; // pending_incoming/friends handled elsewhere
-      }
-      await refreshStatus([targetId]);
-    } catch (e) {
-      console.error(e);
+async function handleToggleRequest(targetId: string, relation: FriendRelation) {
+  try {
+    // Optimistically flip the UI first
+    setFriendStatus(prev => ({
+      ...prev,
+      [targetId]: relation === 'none' ? 'pending_outgoing' : 'none',
+    }));
+
+    if (relation === 'none') {
+      const { error } = await supabase.rpc('request_friend', { target_id: targetId });
+      if (error) throw error;
+    } else if (relation === 'pending_outgoing') {
+      // Cancel the outgoing request
+      const { error } = await supabase.rpc('unfriend', { target_id: targetId });
+      if (error) throw error;
+    } else {
+      return; // pending_incoming or friends handled elsewhere
     }
+
+    // Confirm with source of truth
+    await refreshStatus([targetId]);
+  } catch (e: any) {
+    console.error(e);
+    // Revert the optimistic change on failure
+    setFriendStatus(prev => ({ ...prev, [targetId]: relation }));
+    alert(e?.message ?? 'Failed to update friend request.');
   }
+}
 
   async function handleUnfriend(targetId: string) {
     try {
