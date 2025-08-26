@@ -51,7 +51,7 @@ export default function PublicRecipesFeed() {
           'id, user_id, title, cuisine, photo_url, instructions, created_at, visibility, profiles:profiles!recipes_user_id_fkey(id, display_name, nickname, avatar_url)'
         )
         .order('created_at', { ascending: false })
-        .limit(60);
+        .limit(70);
 
       if (e1) {
         console.error(e1);
