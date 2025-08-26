@@ -1,5 +1,5 @@
 // app/test-recipe-card/page.tsx
-import RecipeCard from '@/components/RecipeCard';
+import RecipeCard from '../components/RecipeCard';
 
 export default function TestRecipeCardPage() {
   const sample = {
