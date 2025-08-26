@@ -185,10 +185,12 @@ export default function PublicRecipesFeed() {
     );
   }, [loading, rows, currentUserId, heartCounts, didHeartSet, didSaveSet, ownerBookmarkCounts]);
 
-  return (
-    <main className="p-4">
-      <h1 className="text-lg font-semibold mb-4">Community — Public Recipes</h1>
-      {content}
-    </main>
-  );
-}
+return (
+  <main className="p-4">
+    <h1 className="text-lg font-semibold mb-2">Community — Public Recipes</h1>
+    <p className="text-xs text-gray-500 mb-4">
+      viewer: {currentUserId ?? 'anon'} • recipes: {rows.length}
+    </p>
+    {content}
+  </main>
+);
