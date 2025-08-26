@@ -29,7 +29,7 @@ export default async function RecipePage({ params }: { params: { id: string } })
   // RLS will enforce visibility here
   const { data: recipe, error } = await supabase
     .from('recipes')
-    .select('id, title, cuisine, user_id, visibility, photo_url, instructions')
+    .select('id, title, cuisine, user_id, visibility, photo_url, ingredients, instructions')
     .eq('id', params.id)
     .single();
 
