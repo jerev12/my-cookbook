@@ -20,14 +20,13 @@ type RecipeRow = {
   instructions: string | null;
   created_at: string | null;
   visibility: string;
-  // NOTE: In some projects, PostgREST returns a single object; in others, an array.
-  profiles?: Profile | Profile[] | null;
 };
 
 export default function PublicRecipesFeed() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<RecipeRow[]>([]);
+  const [profilesMap, setProfilesMap] = useState<Record<string, Profile>>({});
   const [heartCounts, setHeartCounts] = useState<Record<string, number>>({});
   const [didHeartSet, setDidHeartSet] = useState<Set<string>>(new Set());
   const [didSaveSet, setDidSaveSet] = useState<Set<string>>(new Set());
@@ -54,16 +53,11 @@ export default function PublicRecipesFeed() {
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // 2) Fetch recipes (NO visibility filter yet — debug Step A)
+      // 2) Fetch PUBLIC recipes (no embed)
       const { data: recs, error: e1 } = await supabase
         .from('recipes')
-        .select(`
-          id, user_id, title, cuisine, photo_url, instructions, created_at, visibility,
-          profiles (
-            id, display_name, nickname, avatar_url
-          )
-        `)
-        // .eq('visibility', 'public') // <— keep commented for now while debugging
+        .select('id, user_id, title, cuisine, photo_url, instructions, created_at, visibility')
+        .eq('visibility', 'public')
         .order('created_at', { ascending: false })
         .limit(60);
 
@@ -76,18 +70,37 @@ export default function PublicRecipesFeed() {
         return;
       }
 
-      // Cast via unknown to satisfy TS (shape depends on PostgREST embedding)
-      const recipes = (recs ?? []) as unknown as RecipeRow[];
+      const recipes = (recs ?? []) as RecipeRow[];
       if (!mounted) return;
       setRows(recipes);
 
       const recipeIds = recipes.map(r => r.id);
+      const authorIds = Array.from(new Set(recipes.map(r => r.user_id)));
+
+      // If nothing to do, stop early
       if (recipeIds.length === 0) {
         if (mounted) setLoading(false);
         return;
       }
 
-      // 3) HEART COUNTS (fetch rows, aggregate in JS)
+      // 3) Load author profiles in one call
+      if (authorIds.length > 0) {
+        const { data: profs, error: pe } = await supabase
+          .from('profiles')
+          .select('id, display_name, nickname, avatar_url')
+          .in('id', authorIds);
+
+        if (pe) {
+          console.error('profiles error', pe);
+          if (mounted) setDebugErr(prev => prev ?? `profiles: ${pe.message ?? String(pe)}`);
+        } else if (mounted) {
+          const map: Record<string, Profile> = {};
+          for (const p of (profs ?? []) as Profile[]) map[p.id] = p;
+          setProfilesMap(map);
+        }
+      }
+
+      // 4) HEART COUNTS (fetch rows, aggregate in JS)
       {
         const { data: heartRows, error } = await supabase
           .from('recipe_hearts')
@@ -107,7 +120,7 @@ export default function PublicRecipesFeed() {
         }
       }
 
-      // 4) Viewer-specific hearts & saves
+      // 5) Viewer-specific hearts & saves
       if (uid) {
         // did I heart?
         const { data: myHearts, error: eH } = await supabase
@@ -135,7 +148,7 @@ export default function PublicRecipesFeed() {
           setDidSaveSet(new Set((mySaves ?? []).map(r => (r as any).recipe_id as string)));
         }
 
-        // 5) BOOKMARK COUNTS for recipes I own (aggregate in JS)
+        // 6) BOOKMARK COUNTS for recipes I own (aggregate in JS)
         const myOwnedIds = recipes.filter(r => r.user_id === uid).map(r => r.id);
         if (myOwnedIds.length > 0) {
           const { data: bmRows, error: eBM } = await supabase
@@ -173,11 +186,7 @@ export default function PublicRecipesFeed() {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {rows.map((r) => {
-          // profiles can be object or array — normalize to a single profile
-          const p = r.profiles
-            ? (Array.isArray(r.profiles) ? r.profiles[0] : r.profiles)
-            : null;
-
+          const p = profilesMap[r.user_id] || null;
           const author = p
             ? {
                 id: p.id,
@@ -194,7 +203,6 @@ export default function PublicRecipesFeed() {
               title={r.title}
               cuisine={r.cuisine}
               photo_url={r.photo_url}
-              // pass ingredients here when you add them
               instructions={r.instructions}
               created_at={r.created_at}
               author={author ?? null}
@@ -210,7 +218,7 @@ export default function PublicRecipesFeed() {
         })}
       </div>
     );
-  }, [loading, rows, currentUserId, heartCounts, didHeartSet, didSaveSet, ownerBookmarkCounts]);
+  }, [loading, rows, profilesMap, currentUserId, heartCounts, didHeartSet, didSaveSet, ownerBookmarkCounts]);
 
   return (
     <main className="p-4">
