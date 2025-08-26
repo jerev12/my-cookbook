@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeCard from '../components/RecipeCard';
+import RecipeCard from '@/components/RecipeCard';
 
 type Profile = {
   id: string;
@@ -20,7 +20,8 @@ type RecipeRow = {
   instructions: string | null;
   created_at: string | null;
   visibility: string;
-  profiles?: Profile | null;
+  // NOTE: In some projects, PostgREST returns a single object; in others, an array.
+  profiles?: Profile | Profile[] | null;
 };
 
 export default function PublicRecipesFeed() {
@@ -33,7 +34,7 @@ export default function PublicRecipesFeed() {
   const [ownerBookmarkCounts, setOwnerBookmarkCounts] = useState<Record<string, number>>({});
   const [debugErr, setDebugErr] = useState<string | null>(null);
 
-  // For visibility: which Supabase project is this build talking to?
+  // Which Supabase project is this build talking to?
   const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 
   useEffect(() => {
@@ -45,15 +46,15 @@ export default function PublicRecipesFeed() {
 
       // 1) Who’s the viewer?
       const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (authErr) {
+      if (authErr && mounted) {
         console.error('auth.getUser error', authErr);
-        if (mounted) setDebugErr(`auth.getUser: ${authErr.message ?? String(authErr)}`);
+        setDebugErr(`auth.getUser: ${authErr.message ?? String(authErr)}`);
       }
       const uid = authData?.user?.id ?? null;
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // 2) Fetch recipes (NO visibility filter yet — Step A)
+      // 2) Fetch recipes (NO visibility filter yet — debug Step A)
       const { data: recs, error: e1 } = await supabase
         .from('recipes')
         .select(`
@@ -62,18 +63,21 @@ export default function PublicRecipesFeed() {
             id, display_name, nickname, avatar_url
           )
         `)
-        // .eq('visibility', 'public') // <— keep commented for debug Step A
+        // .eq('visibility', 'public') // <— keep commented for now while debugging
         .order('created_at', { ascending: false })
         .limit(60);
 
       if (e1) {
         console.error('recipes error', e1);
-        if (mounted) setDebugErr(`recipes select: ${e1.code ?? ''} ${e1.message ?? String(e1)}`);
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setDebugErr(`recipes select: ${e1.code ?? ''} ${e1.message ?? String(e1)}`);
+          setLoading(false);
+        }
         return;
       }
 
-      const recipes = (recs ?? []) as RecipeRow[];
+      // Cast via unknown to satisfy TS (shape depends on PostgREST embedding)
+      const recipes = (recs ?? []) as unknown as RecipeRow[];
       if (!mounted) return;
       setRows(recipes);
 
@@ -169,12 +173,17 @@ export default function PublicRecipesFeed() {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {rows.map((r) => {
-          const author = r.profiles
+          // profiles can be object or array — normalize to a single profile
+          const p = r.profiles
+            ? (Array.isArray(r.profiles) ? r.profiles[0] : r.profiles)
+            : null;
+
+          const author = p
             ? {
-                id: r.profiles.id,
-                display_name: r.profiles.display_name,
-                nickname: r.profiles.nickname,
-                avatar_url: r.profiles.avatar_url,
+                id: p.id,
+                display_name: p.display_name,
+                nickname: p.nickname,
+                avatar_url: p.avatar_url,
               }
             : undefined;
 
@@ -213,9 +222,7 @@ export default function PublicRecipesFeed() {
         viewer: {currentUserId ?? 'anon'} • recipes: {rows.length}
       </p>
       {debugErr && (
-        <p className="text-[11px] text-rose-600 mb-2">
-          {debugErr}
-        </p>
+        <p className="text-[11px] text-rose-600 mb-2">{debugErr}</p>
       )}
 
       {content}
