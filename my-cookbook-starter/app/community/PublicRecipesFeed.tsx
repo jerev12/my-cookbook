@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeCard from '../components/RecipeCard';
+import RecipeCard from '@/components/RecipeCard';
 
 type Profile = {
   id: string;
@@ -20,7 +20,7 @@ type RecipeRow = {
   instructions: string | null;
   created_at: string | null;
   visibility: string;
-  profiles?: Profile;
+  profiles?: Profile | null;
 };
 
 export default function PublicRecipesFeed() {
@@ -31,34 +31,49 @@ export default function PublicRecipesFeed() {
   const [didHeartSet, setDidHeartSet] = useState<Set<string>>(new Set());
   const [didSaveSet, setDidSaveSet] = useState<Set<string>>(new Set());
   const [ownerBookmarkCounts, setOwnerBookmarkCounts] = useState<Record<string, number>>({});
+  const [debugErr, setDebugErr] = useState<string | null>(null);
+
+  // For visibility: which Supabase project is this build talking to?
+  const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 
   useEffect(() => {
     let mounted = true;
 
     async function load() {
       setLoading(true);
+      setDebugErr(null);
 
       // 1) Who’s the viewer?
-      const { data: authData } = await supabase.auth.getUser();
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (authErr) {
+        console.error('auth.getUser error', authErr);
+        if (mounted) setDebugErr(`auth.getUser: ${authErr.message ?? String(authErr)}`);
+      }
       const uid = authData?.user?.id ?? null;
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // 2) Public recipes + author
+      // 2) Fetch recipes (NO visibility filter yet — Step A)
       const { data: recs, error: e1 } = await supabase
         .from('recipes')
-        .select(
-          'id, user_id, title, cuisine, photo_url, instructions, created_at, visibility, profiles:profiles!recipes_user_id_fkey(id, display_name, nickname, avatar_url)'
-        )
+        .select(`
+          id, user_id, title, cuisine, photo_url, instructions, created_at, visibility,
+          profiles (
+            id, display_name, nickname, avatar_url
+          )
+        `)
+        // .eq('visibility', 'public') // <— keep commented for debug Step A
         .order('created_at', { ascending: false })
-        .limit(70);
+        .limit(60);
 
       if (e1) {
-        console.error(e1);
+        console.error('recipes error', e1);
+        if (mounted) setDebugErr(`recipes select: ${e1.code ?? ''} ${e1.message ?? String(e1)}`);
         if (mounted) setLoading(false);
         return;
       }
-      const recipes = (recs ?? []) as unknown as RecipeRow[];
+
+      const recipes = (recs ?? []) as RecipeRow[];
       if (!mounted) return;
       setRows(recipes);
 
@@ -76,7 +91,8 @@ export default function PublicRecipesFeed() {
           .in('recipe_id', recipeIds);
 
         if (error) {
-          console.error(error);
+          console.error('heart rows error', error);
+          if (mounted) setDebugErr(prev => prev ?? `heart rows: ${error.message ?? String(error)}`);
         } else if (mounted) {
           const map: Record<string, number> = {};
           for (const row of heartRows ?? []) {
@@ -96,7 +112,8 @@ export default function PublicRecipesFeed() {
           .eq('user_id', uid)
           .in('recipe_id', recipeIds);
         if (eH) {
-          console.error(eH);
+          console.error('myHearts error', eH);
+          if (mounted) setDebugErr(prev => prev ?? `myHearts: ${eH.message ?? String(eH)}`);
         } else if (mounted) {
           setDidHeartSet(new Set((myHearts ?? []).map(r => (r as any).recipe_id as string)));
         }
@@ -108,12 +125,13 @@ export default function PublicRecipesFeed() {
           .eq('user_id', uid)
           .in('recipe_id', recipeIds);
         if (eS) {
-          console.error(eS);
+          console.error('mySaves error', eS);
+          if (mounted) setDebugErr(prev => prev ?? `mySaves: ${eS.message ?? String(eS)}`);
         } else if (mounted) {
           setDidSaveSet(new Set((mySaves ?? []).map(r => (r as any).recipe_id as string)));
         }
 
-        // 5) BOOKMARK COUNTS for recipes I own (fetch rows, aggregate in JS)
+        // 5) BOOKMARK COUNTS for recipes I own (aggregate in JS)
         const myOwnedIds = recipes.filter(r => r.user_id === uid).map(r => r.id);
         if (myOwnedIds.length > 0) {
           const { data: bmRows, error: eBM } = await supabase
@@ -122,7 +140,8 @@ export default function PublicRecipesFeed() {
             .in('recipe_id', myOwnedIds);
 
           if (eBM) {
-            console.error(eBM);
+            console.error('bookmark rows error', eBM);
+            if (mounted) setDebugErr(prev => prev ?? `bookmark rows: ${eBM.message ?? String(eBM)}`);
           } else if (mounted) {
             const map: Record<string, number> = {};
             for (const row of bmRows ?? []) {
@@ -166,7 +185,7 @@ export default function PublicRecipesFeed() {
               title={r.title}
               cuisine={r.cuisine}
               photo_url={r.photo_url}
-              // Pass ingredients here when you have them
+              // pass ingredients here when you add them
               instructions={r.instructions}
               created_at={r.created_at}
               author={author ?? null}
@@ -184,13 +203,22 @@ export default function PublicRecipesFeed() {
     );
   }, [loading, rows, currentUserId, heartCounts, didHeartSet, didSaveSet, ownerBookmarkCounts]);
 
-return (
-  <main className="p-4">
-    <h1 className="text-lg font-semibold mb-2">Community — Public Recipes</h1>
-    <p className="text-xs text-gray-500 mb-4">
-      viewer: {currentUserId ?? 'anon'} • recipes: {rows.length}
-    </p>
-    {content}
-  </main>
-);
+  return (
+    <main className="p-4">
+      <h1 className="text-lg font-semibold mb-1">Community — Public Recipes</h1>
+
+      {/* Debug strip */}
+      <p className="text-[11px] text-gray-500 mb-1 break-all">supabase: {SUPA_URL}</p>
+      <p className="text-[11px] text-gray-500 mb-1">
+        viewer: {currentUserId ?? 'anon'} • recipes: {rows.length}
+      </p>
+      {debugErr && (
+        <p className="text-[11px] text-rose-600 mb-2">
+          {debugErr}
+        </p>
+      )}
+
+      {content}
+    </main>
+  );
 }
