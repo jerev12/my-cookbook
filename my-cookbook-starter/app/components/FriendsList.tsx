@@ -8,96 +8,211 @@ type Profile = { id: string; display_name: string | null; avatar_url: string | n
 
 export default function FriendsList() {
   const [me, setMe] = useState<string | null>(null);
-  const [friends, setFriends] = useState<Profile[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  // Track MY outgoing edges so we can flip Friend/Add Friend without reloading
-  const [myOutEdges, setMyOutEdges] = useState<Set<string>>(new Set());
+  // Incoming requests (people who requested me)
+  const [requests, setRequests] = useState<Profile[]>([]);
+  const [loadingReq, setLoadingReq] = useState(true);
+
+  // Accepted friendships involving me (ALL accepted, not just mutuals)
+  const [friends, setFriends] = useState<Profile[]>([]);
+  const [loadingFriends, setLoadingFriends] = useState(true);
+
+  // Local state for button logic in Friends section
+  // - acceptedIds: who is currently "accepted" with me
+  // - requestedOut: who I have sent a new pending request to (for "Requested" state)
+  const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
+  const [requestedOut, setRequestedOut] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let ignore = false;
 
-    async function load() {
-      setLoading(true);
-
+    async function loadAll() {
+      // Who am I?
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setMe(null); setFriends([]); setLoading(false); return; }
+      if (!user) {
+        setMe(null);
+        setRequests([]); setFriends([]);
+        setAcceptedIds(new Set()); setRequestedOut(new Set());
+        setLoadingReq(false); setLoadingFriends(false);
+        return;
+      }
       setMe(user.id);
 
-      // 1) Start with MUTUAL friends only (clean initial list)
-      const { data: ids, error: idsErr } = await supabase.rpc('get_mutual_friend_ids', { uid: user.id });
-      if (idsErr) {
-        console.error(idsErr);
-        setFriends([]);
-        setLoading(false);
-        return;
-      }
-      const friendIds: string[] = (ids as string[]) ?? [];
+      // ---------- Incoming Requests (status=pending where addressee_id = me) ----------
+      setLoadingReq(true);
+      const { data: reqRows, error: reqErr } = await supabase
+        .from('friendships')
+        .select('requester_id')
+        .eq('addressee_id', user.id)
+        .eq('status', 'pending');
 
-      // 2) Load MY outgoing edges (to decide button state)
-      const { data: outRows, error: outErr } = await supabase
-        .from('friends')
-        .select('friend_id')
-        .eq('user_id', user.id);
-      if (outErr) console.error(outErr);
-      const outSet = new Set<string>((outRows ?? []).map(r => r.friend_id as string));
-      if (!ignore) setMyOutEdges(outSet);
-
-      // 3) Fetch profile details for rows
-      if (friendIds.length === 0) {
-        if (!ignore) { setFriends([]); setLoading(false); }
-        return;
-      }
-      const { data: profiles, error: profErr } = await supabase
-        .from('profiles')
-        .select('id, display_name, avatar_url')
-        .in('id', friendIds);
-
-      if (!ignore) {
-        if (profErr) {
-          console.error(profErr);
-          setFriends([]);
+      if (reqErr) {
+        console.error(reqErr);
+        if (!ignore) { setRequests([]); setLoadingReq(false); }
+      } else {
+        const requesterIds: string[] = (reqRows ?? []).map(r => r.requester_id as string);
+        if (requesterIds.length === 0) {
+          if (!ignore) { setRequests([]); setLoadingReq(false); }
         } else {
-          const sorted = [...(profiles ?? [])].sort((a: Profile, b: Profile) => {
-            const an = (a.display_name ?? '').toLowerCase();
-            const bn = (b.display_name ?? '').toLowerCase();
-            if (an < bn) return -1;
-            if (an > bn) return 1;
-            return a.id < b.id ? -1 : 1;
-          });
-          setFriends(sorted);
+          const { data: reqProfiles, error: rpErr } = await supabase
+            .from('profiles')
+            .select('id, display_name, avatar_url')
+            .in('id', requesterIds);
+          if (rpErr) {
+            console.error(rpErr);
+            if (!ignore) { setRequests([]); }
+          } else {
+            const sorted = [...(reqProfiles ?? [])].sort((a: Profile, b: Profile) => {
+              const an = (a.display_name ?? '').toLowerCase();
+              const bn = (b.display_name ?? '').toLowerCase();
+              if (an < bn) return -1;
+              if (an > bn) return 1;
+              return a.id < b.id ? -1 : 1;
+            });
+            if (!ignore) setRequests(sorted);
+          }
+          if (!ignore) setLoadingReq(false);
         }
-        setLoading(false);
+      }
+
+      // ---------- Outgoing pending requests (for "Requested" state on friends rows) ----------
+      const { data: outPendRows, error: outPendErr } = await supabase
+        .from('friendships')
+        .select('addressee_id')
+        .eq('requester_id', user.id)
+        .eq('status', 'pending');
+      if (outPendErr) {
+        console.error(outPendErr);
+        if (!ignore) setRequestedOut(new Set());
+      } else {
+        const outSet = new Set<string>((outPendRows ?? []).map(r => r.addressee_id as string));
+        if (!ignore) setRequestedOut(outSet);
+      }
+
+      // ---------- Friends (ALL accepted involving me) ----------
+      setLoadingFriends(true);
+      const { data: accRows, error: accErr } = await supabase
+        .from('friendships')
+        .select('requester_id, addressee_id')
+        .eq('status', 'accepted')
+        .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
+
+      if (accErr) {
+        console.error(accErr);
+        if (!ignore) { setFriends([]); setAcceptedIds(new Set()); setLoadingFriends(false); }
+      } else {
+        const otherIds = (accRows ?? []).map(r => {
+          const req = r.requester_id as string;
+          const add = r.addressee_id as string;
+          return req === user.id ? add : req;
+        });
+
+        const uniqueOtherIds = Array.from(new Set(otherIds));
+        const acceptedSet = new Set<string>(uniqueOtherIds);
+
+        if (uniqueOtherIds.length === 0) {
+          if (!ignore) {
+            setFriends([]); setAcceptedIds(acceptedSet); setLoadingFriends(false);
+          }
+        } else {
+          const { data: fProfiles, error: fpErr } = await supabase
+            .from('profiles')
+            .select('id, display_name, avatar_url')
+            .in('id', uniqueOtherIds);
+          if (fpErr) {
+            console.error(fpErr);
+            if (!ignore) { setFriends([]); setAcceptedIds(acceptedSet); setLoadingFriends(false); }
+          } else {
+            const sorted = [...(fProfiles ?? [])].sort((a: Profile, b: Profile) => {
+              const an = (a.display_name ?? '').toLowerCase();
+              const bn = (b.display_name ?? '').toLowerCase();
+              if (an < bn) return -1;
+              if (an > bn) return 1;
+              return a.id < b.id ? -1 : 1;
+            });
+            if (!ignore) {
+              setFriends(sorted);
+              setAcceptedIds(acceptedSet);
+              setLoadingFriends(false);
+            }
+          }
+        }
       }
     }
 
-    load();
+    loadAll();
     return () => { ignore = true; };
   }, []);
 
-  async function addFriend(friendId: string) {
+  // ----- Actions for Requests -----
+  async function acceptRequest(requesterId: string) {
     if (!me) return;
+
     const { error } = await supabase
-      .from('friends')
-      .insert({ user_id: me, friend_id: friendId });
+      .from('friendships')
+      .update({ status: 'accepted', updated_at: new Date().toISOString() })
+      .match({ requester_id: requesterId, addressee_id: me, status: 'pending' });
 
     if (error) {
       console.error(error);
-      alert('Could not add friend.');
+      alert('Could not accept request.');
       return;
     }
-    setMyOutEdges(prev => new Set(prev).add(friendId));
+
+    // Move from Requests -> Friends (UI)
+    setRequests(prev => prev.filter(p => p.id !== requesterId));
+    // add to acceptedIds and maybe to friends list (if not present)
+    setAcceptedIds(prev => new Set(prev).add(requesterId));
+    const exists = friends.some(f => f.id === requesterId);
+    if (!exists) {
+      const { data: pf } = await supabase
+        .from('profiles')
+        .select('id, display_name, avatar_url')
+        .eq('id', requesterId)
+        .maybeSingle();
+      if (pf) {
+        setFriends(prev => [...prev, pf as Profile].sort((a, b) => {
+          const an = (a.display_name ?? '').toLowerCase();
+          const bn = (b.display_name ?? '').toLowerCase();
+          if (an < bn) return -1;
+          if (an > bn) return 1;
+          return a.id < b.id ? -1 : 1;
+        }));
+      }
+    }
+    // If I had previously requested them, clear "Requested" state
+    setRequestedOut(prev => {
+      const next = new Set(prev);
+      next.delete(requesterId);
+      return next;
+    });
   }
 
-  async function unfriend(friendId: string) {
+  async function declineRequest(requesterId: string) {
+    if (!me) return;
+    const { error } = await supabase
+      .from('friendships')
+      .delete()
+      .match({ requester_id: requesterId, addressee_id: me, status: 'pending' });
+
+    if (error) {
+      console.error(error);
+      alert('Could not decline request.');
+      return;
+    }
+    setRequests(prev => prev.filter(p => p.id !== requesterId));
+  }
+
+  // ----- Actions for Friends -----
+  async function unfriend(otherId: string) {
     if (!me) return;
     const ok = window.confirm('Remove this friend?');
     if (!ok) return;
 
     const { error } = await supabase
-      .from('friends')
+      .from('friendships')
       .delete()
-      .match({ user_id: me, friend_id: friendId });
+      .or(`and(requester_id.eq.${me},addressee_id.eq.${otherId},status.eq.accepted),and(requester_id.eq.${otherId},addressee_id.eq.${me},status.eq.accepted)`);
 
     if (error) {
       console.error(error);
@@ -105,115 +220,198 @@ export default function FriendsList() {
       return;
     }
 
-    // Keep the row visible until modal closes; just flip the button state
-    setMyOutEdges(prev => {
+    // Keep row visible until modal closes; flip to "Add Friend"
+    setAcceptedIds(prev => {
       const next = new Set(prev);
-      next.delete(friendId);
+      next.delete(otherId);
+      return next;
+    });
+    // also clear any "Requested" local flag (fresh state)
+    setRequestedOut(prev => {
+      const next = new Set(prev);
+      next.delete(otherId);
       return next;
     });
   }
 
+  async function addFriend(otherId: string) {
+    if (!me) return;
+    // Create a NEW pending request from me -> other
+    const { error } = await supabase
+      .from('friendships')
+      .insert({
+        requester_id: me,
+        addressee_id: otherId,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      // Ignore duplicate if there is already a pending row
+      // Postgres unique constraint might not exist, so we just surface the error if it's something else
+      console.error(error);
+      // Optional: alert user
+      // alert('Could not send request.');
+      return;
+    }
+
+    // Reflect "Requested" state locally
+    setRequestedOut(prev => new Set(prev).add(otherId));
+  }
+
   const content = useMemo(() => {
-    if (loading) return <p>Loading…</p>;
-    if (friends.length === 0) return <p>No friends yet.</p>;
+    const baseBtn: React.CSSProperties = {
+      padding: '6px 12px',
+      borderRadius: 8,
+      border: '1px solid #ddd',
+      fontSize: 14,
+      cursor: 'pointer',
+      whiteSpace: 'nowrap',
+    };
+    const btnGreen: React.CSSProperties = {
+      ...baseBtn,
+      background: '#4CAF50',
+      borderColor: '#4CAF50',
+      color: '#fff',
+    };
+    const btnGray: React.CSSProperties = {
+      ...baseBtn,
+      background: '#eee',
+      color: '#111',
+    };
+    const btnDarkGray: React.CSSProperties = {
+      ...baseBtn,
+      background: '#ddd',
+      color: '#333',
+      cursor: 'default',
+    };
+
+    const listWrap: React.CSSProperties = { maxHeight: '65vh', overflow: 'auto', paddingRight: 4, margin: 0, listStyle: 'none' };
+    const rowStyle: React.CSSProperties = {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      border: '1px solid #eee',
+      borderRadius: 12,
+      padding: 10,
+      marginBottom: 8,
+      background: '#fff',
+      transition: 'transform .06s ease',
+    };
+    const nameStyle: React.CSSProperties = { fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' };
+    const linkStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: 'inherit', flex: 1, minWidth: 0 };
 
     return (
-      <ul style={{ maxHeight: '65vh', overflow: 'auto', paddingRight: 4, margin: 0, listStyle: 'none' }}>
-        {friends.map((f) => {
-          const iFollow = myOutEdges.has(f.id); // my current edge exists?
-          const baseBtn: React.CSSProperties = {
-            padding: '6px 12px',
-            borderRadius: 8,
-            border: '1px solid #ddd',
-            fontSize: 14,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-          };
-          const btnFriend: React.CSSProperties = {
-            ...baseBtn,
-            background: '#4CAF50',
-            borderColor: '#4CAF50',
-            color: '#fff',
-          };
-          const btnAdd: React.CSSProperties = {
-            ...baseBtn,
-            background: '#eee',
-            color: '#111',
-          };
+      <div>
+        {/* ===== Requests section ===== */}
+        {loadingReq ? (
+          <p>Loading requests…</p>
+        ) : requests.length > 0 ? (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontWeight: 700, margin: '0 0 8px 2px' }}>Requests</div>
+            <ul style={listWrap}>
+              {requests.map((p) => {
+                const handle = p.display_name ? encodeURIComponent(p.display_name) : p.id;
+                const href = `/u/${handle}`;
+                return (
+                  <li
+                    key={p.id}
+                    style={rowStyle}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(-1px)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(0)'; }}
+                  >
+                    <Link href={href} style={linkStyle}>
+                      <img
+                        src={p.avatar_url || '/avatar-placeholder.png'}
+                        alt=""
+                        style={{ height: 40, width: 40, borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }}
+                      />
+                      <div style={nameStyle}>{p.display_name || p.id}</div>
+                    </Link>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => acceptRequest(p.id)} style={btnGreen} aria-label="Accept request">Accept</button>
+                      <button onClick={() => declineRequest(p.id)} style={btnGray} aria-label="Decline request">Decline</button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : null}
 
-          // Use display_name as handle (URL-encode). Fallback to id if missing.
-          const handle = f.display_name ? encodeURIComponent(f.display_name) : f.id;
-          const href = `/u/${handle}`;
+        {/* ===== Friends section (ALL accepted rows involving me) ===== */}
+        {loadingFriends ? (
+          <p>Loading friends…</p>
+        ) : friends.length === 0 ? (
+          <p>No friends yet.</p>
+        ) : (
+          <>
+            <div style={{ fontWeight: 700, margin: '0 0 8px 2px' }}>Friends</div>
+            <ul style={listWrap}>
+              {friends.map((f) => {
+                const isAccepted = acceptedIds.has(f.id);
+                const isRequestedOut = requestedOut.has(f.id);
 
-          return (
-            <li
-              key={f.id}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                border: '1px solid #eee',
-                borderRadius: 12,
-                padding: 10,
-                marginBottom: 8,
-                background: '#fff',
-                transition: 'transform .06s ease',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(-1px)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(0)'; }}
-            >
-              {/* Left: open their public My Cookbook */}
-              <Link
-                href={href}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  textDecoration: 'none',
-                  color: 'inherit',
-                  flex: 1,
-                  minWidth: 0,
-                }}
-              >
-                <img
-                  src={f.avatar_url || '/avatar-placeholder.png'}
-                  alt=""
-                  style={{
-                    height: 40, width: 40, borderRadius: '50%',
-                    objectFit: 'cover', border: '1px solid #ddd'
-                  }}
-                />
-                <div style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {f.display_name || f.id}
-                </div>
-              </Link>
+                const handle = f.display_name ? encodeURIComponent(f.display_name) : f.id;
+                const href = `/u/${handle}`;
 
-              {/* Right: status button (prevent link navigation) */}
-              {iFollow ? (
-                <button
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); unfriend(f.id); }}
-                  style={btnFriend}
-                  aria-label="Remove friend"
-                  title="Remove friend"
-                >
-                  Friend
-                </button>
-              ) : (
-                <button
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFriend(f.id); }}
-                  style={btnAdd}
-                  aria-label="Add friend"
-                  title="Add friend"
-                >
-                  Add Friend
-                </button>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                return (
+                  <li
+                    key={f.id}
+                    style={rowStyle}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(-1px)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(0)'; }}
+                  >
+                    {/* Left: open their public My Cookbook */}
+                    <Link href={href} style={linkStyle}>
+                      <img
+                        src={f.avatar_url || '/avatar-placeholder.png'}
+                        alt=""
+                        style={{ height: 40, width: 40, borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }}
+                      />
+                      <div style={nameStyle}>{f.display_name || f.id}</div>
+                    </Link>
+
+                    {/* Right: status button (prevent link navigation) */}
+                    {isAccepted ? (
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); unfriend(f.id); }}
+                        style={btnGreen}
+                        aria-label="Remove friend"
+                        title="Remove friend"
+                      >
+                        Friend
+                      </button>
+                    ) : isRequestedOut ? (
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                        style={btnDarkGray}
+                        aria-label="Request sent"
+                        title="Request sent"
+                        disabled
+                      >
+                        Requested
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFriend(f.id); }}
+                        style={btnGray}
+                        aria-label="Add friend"
+                        title="Add friend"
+                      >
+                        Add Friend
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </div>
     );
-  }, [friends, loading, myOutEdges]);
+  }, [requests, loadingReq, friends, loadingFriends, acceptedIds, requestedOut]);
 
   return content;
 }
