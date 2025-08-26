@@ -31,44 +31,26 @@ export default function PublicRecipesFeed() {
   const [didHeartSet, setDidHeartSet] = useState<Set<string>>(new Set());
   const [didSaveSet, setDidSaveSet] = useState<Set<string>>(new Set());
   const [ownerBookmarkCounts, setOwnerBookmarkCounts] = useState<Record<string, number>>({});
-  const [debugErr, setDebugErr] = useState<string | null>(null);
-
-  // Which Supabase project is this build talking to?
-  const SUPA_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 
   useEffect(() => {
     let mounted = true;
 
     async function load() {
       setLoading(true);
-      setDebugErr(null);
 
-      // 1) Who’s the viewer?
-      const { data: authData, error: authErr } = await supabase.auth.getUser();
-      if (authErr && mounted) {
-        console.error('auth.getUser error', authErr);
-        setDebugErr(`auth.getUser: ${authErr.message ?? String(authErr)}`);
-      }
+      // 1) Viewer
+      const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id ?? null;
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // 2) Fetch PUBLIC recipes (no embed)
-      const { data: recs, error: e1 } = await supabase
+      // 2) Public recipes (no embed)
+      const { data: recs } = await supabase
         .from('recipes')
         .select('id, user_id, title, cuisine, photo_url, instructions, created_at, visibility')
         .eq('visibility', 'public')
         .order('created_at', { ascending: false })
         .limit(60);
-
-      if (e1) {
-        console.error('recipes error', e1);
-        if (mounted) {
-          setDebugErr(`recipes select: ${e1.code ?? ''} ${e1.message ?? String(e1)}`);
-          setLoading(false);
-        }
-        return;
-      }
 
       const recipes = (recs ?? []) as RecipeRow[];
       if (!mounted) return;
@@ -77,40 +59,39 @@ export default function PublicRecipesFeed() {
       const recipeIds = recipes.map(r => r.id);
       const authorIds = Array.from(new Set(recipes.map(r => r.user_id)));
 
-      // If nothing to do, stop early
       if (recipeIds.length === 0) {
+        if (mounted) setProfilesMap({});
+        if (mounted) setHeartCounts({});
+        if (mounted) setDidHeartSet(new Set());
+        if (mounted) setDidSaveSet(new Set());
+        if (mounted) setOwnerBookmarkCounts({});
         if (mounted) setLoading(false);
         return;
       }
 
-      // 3) Load author profiles in one call
+      // 3) Author profiles in one call
       if (authorIds.length > 0) {
-        const { data: profs, error: pe } = await supabase
+        const { data: profs } = await supabase
           .from('profiles')
           .select('id, display_name, nickname, avatar_url')
           .in('id', authorIds);
-
-        if (pe) {
-          console.error('profiles error', pe);
-          if (mounted) setDebugErr(prev => prev ?? `profiles: ${pe.message ?? String(pe)}`);
-        } else if (mounted) {
+        if (mounted) {
           const map: Record<string, Profile> = {};
           for (const p of (profs ?? []) as Profile[]) map[p.id] = p;
           setProfilesMap(map);
         }
+      } else {
+        if (mounted) setProfilesMap({});
       }
 
-      // 4) HEART COUNTS (fetch rows, aggregate in JS)
+      // 4) Heart counts (aggregate in JS)
       {
-        const { data: heartRows, error } = await supabase
+        const { data: heartRows } = await supabase
           .from('recipe_hearts')
           .select('recipe_id')
           .in('recipe_id', recipeIds);
 
-        if (error) {
-          console.error('heart rows error', error);
-          if (mounted) setDebugErr(prev => prev ?? `heart rows: ${error.message ?? String(error)}`);
-        } else if (mounted) {
+        if (mounted) {
           const map: Record<string, number> = {};
           for (const row of heartRows ?? []) {
             const rid = (row as any).recipe_id as string;
@@ -122,44 +103,29 @@ export default function PublicRecipesFeed() {
 
       // 5) Viewer-specific hearts & saves
       if (uid) {
-        // did I heart?
-        const { data: myHearts, error: eH } = await supabase
+        const { data: myHearts } = await supabase
           .from('recipe_hearts')
           .select('recipe_id')
           .eq('user_id', uid)
           .in('recipe_id', recipeIds);
-        if (eH) {
-          console.error('myHearts error', eH);
-          if (mounted) setDebugErr(prev => prev ?? `myHearts: ${eH.message ?? String(eH)}`);
-        } else if (mounted) {
-          setDidHeartSet(new Set((myHearts ?? []).map(r => (r as any).recipe_id as string)));
-        }
+        if (mounted) setDidHeartSet(new Set((myHearts ?? []).map(r => (r as any).recipe_id as string)));
 
-        // did I save?
-        const { data: mySaves, error: eS } = await supabase
+        const { data: mySaves } = await supabase
           .from('recipe_bookmarks')
           .select('recipe_id')
           .eq('user_id', uid)
           .in('recipe_id', recipeIds);
-        if (eS) {
-          console.error('mySaves error', eS);
-          if (mounted) setDebugErr(prev => prev ?? `mySaves: ${eS.message ?? String(eS)}`);
-        } else if (mounted) {
-          setDidSaveSet(new Set((mySaves ?? []).map(r => (r as any).recipe_id as string)));
-        }
+        if (mounted) setDidSaveSet(new Set((mySaves ?? []).map(r => (r as any).recipe_id as string)));
 
-        // 6) BOOKMARK COUNTS for recipes I own (aggregate in JS)
+        // 6) Owner-only bookmark counts (aggregate in JS)
         const myOwnedIds = recipes.filter(r => r.user_id === uid).map(r => r.id);
         if (myOwnedIds.length > 0) {
-          const { data: bmRows, error: eBM } = await supabase
+          const { data: bmRows } = await supabase
             .from('recipe_bookmarks')
             .select('recipe_id')
             .in('recipe_id', myOwnedIds);
 
-          if (eBM) {
-            console.error('bookmark rows error', eBM);
-            if (mounted) setDebugErr(prev => prev ?? `bookmark rows: ${eBM.message ?? String(eBM)}`);
-          } else if (mounted) {
+          if (mounted) {
             const map: Record<string, number> = {};
             for (const row of bmRows ?? []) {
               const rid = (row as any).recipe_id as string;
@@ -167,6 +133,14 @@ export default function PublicRecipesFeed() {
             }
             setOwnerBookmarkCounts(map);
           }
+        } else {
+          if (mounted) setOwnerBookmarkCounts({});
+        }
+      } else {
+        if (mounted) {
+          setDidHeartSet(new Set());
+          setDidSaveSet(new Set());
+          setOwnerBookmarkCounts({});
         }
       }
 
@@ -174,9 +148,7 @@ export default function PublicRecipesFeed() {
     }
 
     load();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   const content = useMemo(() => {
@@ -222,17 +194,7 @@ export default function PublicRecipesFeed() {
 
   return (
     <main className="p-4">
-      <h1 className="text-lg font-semibold mb-1">Community — Public Recipes</h1>
-
-      {/* Debug strip */}
-      <p className="text-[11px] text-gray-500 mb-1 break-all">supabase: {SUPA_URL}</p>
-      <p className="text-[11px] text-gray-500 mb-1">
-        viewer: {currentUserId ?? 'anon'} • recipes: {rows.length}
-      </p>
-      {debugErr && (
-        <p className="text-[11px] text-rose-600 mb-2">{debugErr}</p>
-      )}
-
+      <h1 className="text-lg font-semibold mb-4">Community — Public Recipes</h1>
       {content}
     </main>
   );
