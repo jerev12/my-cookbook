@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeCard from '@/components/RecipeCard';
+import RecipeCard from '../components/RecipeCard';
 
 type Profile = {
   id: string;
