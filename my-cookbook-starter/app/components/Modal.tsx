@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 type ModalProps = {
   open: boolean;
   onClose: () => void;
-  title?: string;       // keep as string since you're using Option A
+  title?: string; // keep as plain string (Option A)
   children: ReactNode;
 };
 
@@ -32,7 +32,6 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
   if (!open) return null;
   if (typeof window === 'undefined') return null; // SSR guard
 
-  // Render into body so it always overlays the page
   return createPortal(
     <div
       className="fixed inset-0 z-[1000] flex items-center justify-center"
@@ -58,9 +57,7 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
             ✕
           </button>
         </div>
-        <div className="p-4">
-          {children}
-        </div>
+        <div className="p-4">{children}</div>
       </div>
     </div>,
     document.body
