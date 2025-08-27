@@ -3,11 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-// If your Modal is at app/components/Modal.tsx, use this:
-import Modal from '../components/Modal';
-// If your RecipeCard is also under app/components, use:
-// import RecipeCard from '../components/RecipeCard';
-import RecipeCard from '../components/RecipeCard';
+import Modal from '../components/Modal'; // adjust if your Modal path differs
+import RecipeCard from '@/components/RecipeCard';
 
 type Profile = {
   id: string;
@@ -28,12 +25,12 @@ type RecipeRow = {
 };
 
 export default function PublicRecipesFeed() {
-  // List state
+  // list
   const [rows, setRows] = useState<RecipeRow[]>([]);
   const [profilesMap, setProfilesMap] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
 
-  // Modal/detail state
+  // modal/detail
   const [open, setOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -41,17 +38,16 @@ export default function PublicRecipesFeed() {
   const [detailRecipe, setDetailRecipe] = useState<RecipeRow | null>(null);
   const [detailAuthor, setDetailAuthor] = useState<Profile | null>(null);
 
-  // Pre-hydrated card meta
+  // pre-hydrated meta
   const [initialHeartCount, setInitialHeartCount] = useState<number>(0);
   const [initialDidHeart, setInitialDidHeart] = useState<boolean>(false);
   const [initialDidSave, setInitialDidSave] = useState<boolean>(false);
   const [initialBookmarkCountForOwner, setInitialBookmarkCountForOwner] =
     useState<number | undefined>(undefined);
 
-  // -------------------- Load the list (titles + author names) --------------------
+  // load list
   useEffect(() => {
     let mounted = true;
-
     async function loadList() {
       setLoading(true);
 
@@ -83,25 +79,20 @@ export default function PublicRecipesFeed() {
 
       setLoading(false);
     }
-
     loadList();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
-  // -------------------- Open modal: load detail on demand --------------------
+  // open modal + load detail
   async function openRecipe(id: string) {
     setSelectedId(id);
     setOpen(true);
     setDetailLoading(true);
 
-    // Viewer
     const { data: authData } = await supabase.auth.getUser();
     const uid = authData?.user?.id ?? null;
     setCurrentUserId(uid);
 
-    // Recipe
     const { data: recs } = await supabase
       .from('recipes')
       .select('id, user_id, title, cuisine, photo_url, instructions, created_at, visibility')
@@ -110,7 +101,6 @@ export default function PublicRecipesFeed() {
     const row = (recs?.[0] as RecipeRow) ?? null;
     setDetailRecipe(row);
 
-    // Author
     if (row) {
       const existing = profilesMap[row.user_id];
       if (existing) {
@@ -124,14 +114,12 @@ export default function PublicRecipesFeed() {
         setDetailAuthor((profs?.[0] as Profile) ?? null);
       }
 
-      // Heart count
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
         .eq('recipe_id', row.id);
       setInitialHeartCount((heartRows ?? []).length);
 
-      // did I heart/save + owner bookmark count
       if (uid) {
         const { data: myHeart } = await supabase
           .from('recipe_hearts')
@@ -182,7 +170,6 @@ export default function PublicRecipesFeed() {
     if (loading) return <p className="text-sm text-gray-600">Loading public recipes…</p>;
     if (!rows.length) return <p className="text-sm text-gray-600">No public recipes yet.</p>;
 
-    // Title-only list (like My Cookbook)
     return (
       <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
         {rows.map((r) => {
@@ -215,9 +202,7 @@ export default function PublicRecipesFeed() {
       <h1 className="text-lg font-semibold mb-4">Community — Public Recipes</h1>
       {content}
 
-      {/* Modal overlay with full card */}
       <Modal open={open} onClose={closeModal} title="Recipe">
-        {/* Optional: link to shareable full page */}
         {selectedId && (
           <div className="mb-3">
             <Link href={`/recipes/${selectedId}`} className="text-xs text-blue-600 hover:underline">
