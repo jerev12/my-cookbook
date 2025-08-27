@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-import Modal from '../components/Modal';
-import RecipeCard from '../components/RecipeCard';
+import Modal from '@/components/Modal';
+import RecipeCard from '@/components/RecipeCard';
 
 type Profile = {
   id: string;
@@ -19,8 +19,8 @@ type RecipeRow = {
   title: string;
   cuisine: string | null;
   created_at: string | null;
-  photo_url: string | null;         // we’ll pass through if present
-  instructions: string | null;      // for detail view fallback if needed
+  photo_url: string | null;
+  instructions: string | null;
   visibility: string;
 };
 
@@ -51,7 +51,6 @@ export default function PublicRecipesFeed() {
     async function loadList() {
       setLoading(true);
 
-      // 1) Public recipes (light, list-friendly fields)
       const { data: recs } = await supabase
         .from('recipes')
         .select('id, user_id, title, cuisine, photo_url, instructions, created_at, visibility')
@@ -63,7 +62,6 @@ export default function PublicRecipesFeed() {
       if (!mounted) return;
       setRows(recipes);
 
-      // 2) Authors (display name / nickname) — single query for all authors
       const authorIds = Array.from(new Set(recipes.map(r => r.user_id)));
       if (authorIds.length) {
         const { data: profs } = await supabase
@@ -92,12 +90,10 @@ export default function PublicRecipesFeed() {
     setOpen(true);
     setDetailLoading(true);
 
-    // Who is viewing?
     const { data: authData } = await supabase.auth.getUser();
     const uid = authData?.user?.id ?? null;
     setCurrentUserId(uid);
 
-    // Recipe row (ensure we have fresh detail fields)
     const { data: recs } = await supabase
       .from('recipes')
       .select('id, user_id, title, cuisine, photo_url, instructions, created_at, visibility')
@@ -106,7 +102,6 @@ export default function PublicRecipesFeed() {
     const row = (recs?.[0] as RecipeRow) ?? null;
     setDetailRecipe(row);
 
-    // Author
     if (row) {
       const existing = profilesMap[row.user_id];
       if (existing) {
@@ -119,19 +114,13 @@ export default function PublicRecipesFeed() {
           .limit(1);
         setDetailAuthor((profs?.[0] as Profile) ?? null);
       }
-    } else {
-      setDetailAuthor(null);
-    }
 
-    // Heart count
-    if (row) {
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
         .eq('recipe_id', row.id);
       setInitialHeartCount((heartRows ?? []).length);
 
-      // did I heart/save?
       if (uid) {
         const { data: myHeart } = await supabase
           .from('recipe_hearts')
@@ -149,7 +138,6 @@ export default function PublicRecipesFeed() {
           .limit(1);
         setInitialDidSave(!!mySave?.length);
 
-        // owner-only bookmark count
         if (row.user_id === uid) {
           const { data: bmRows } = await supabase
             .from('recipe_bookmarks')
@@ -165,6 +153,7 @@ export default function PublicRecipesFeed() {
         setInitialBookmarkCountForOwner(undefined);
       }
     } else {
+      setDetailAuthor(null);
       setInitialHeartCount(0);
       setInitialDidHeart(false);
       setInitialDidSave(false);
@@ -176,17 +165,12 @@ export default function PublicRecipesFeed() {
 
   function closeModal() {
     setOpen(false);
-    // optional: clear detail state to free memory
-    // setSelectedId(null);
-    // setDetailRecipe(null);
-    // setDetailAuthor(null);
   }
 
   const content = useMemo(() => {
     if (loading) return <p className="text-sm text-gray-600">Loading public recipes…</p>;
     if (!rows.length) return <p className="text-sm text-gray-600">No public recipes yet.</p>;
 
-    // Title-only list (similar to My Cookbook)
     return (
       <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
         {rows.map((r) => {
@@ -220,26 +204,16 @@ export default function PublicRecipesFeed() {
       {content}
 
       {/* Modal using your existing component */}
-      <Modal
-        open={open}
-        onClose={closeModal}
-        title={
-          selectedId && detailRecipe
-            ? (
-              <span className="inline-flex items-center gap-2">
-                <span>Recipe</span>
-                <Link
-                  href={`/recipes/${selectedId}`}
-                  className="text-xs text-blue-600 hover:underline"
-                  // This lets users open the full page (shareable) if they prefer
-                >
-                  Open full page →
-                </Link>
-              </span>
-            )
-            : 'Recipe'
-        }
-      >
+      <Modal open={open} onClose={closeModal} title="Recipe">
+        {/* Optional helper link to the shareable full page */}
+        {selectedId && (
+          <div className="mb-3">
+            <Link href={`/recipes/${selectedId}`} className="text-xs text-blue-600 hover:underline">
+              Open full page →
+            </Link>
+          </div>
+        )}
+
         {detailLoading && <p className="text-sm text-gray-600">Loading…</p>}
         {!detailLoading && !detailRecipe && (
           <p className="text-sm text-gray-600">Recipe not found or not visible.</p>
