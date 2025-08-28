@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 type Visibility = 'private' | 'friends' | 'public';
-
 type IngredientRow = {
   item_name: string;
   quantity?: number | null;
@@ -13,10 +12,26 @@ type IngredientRow = {
   note?: string | null;
 };
 
+// ---- Page wrapper: provides the Suspense boundary ----
 export default function AddRecipePage() {
+  return (
+    <Suspense
+      fallback={
+        <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>
+          Loading…
+        </div>
+      }
+    >
+      <AddRecipeForm />
+    </Suspense>
+  );
+}
+
+// ---- Inner component: safe to use useSearchParams here ----
+function AddRecipeForm() {
   const router = useRouter();
   const sp = useSearchParams();
-  const editId = sp.get('id');              // ← when present => edit mode
+  const editId = sp.get('id'); // when present => edit mode
   const isEditing = useMemo(() => !!editId, [editId]);
 
   // session & page state
@@ -29,7 +44,7 @@ export default function AddRecipePage() {
   const [title, setTitle] = useState('');
   const [cuisine, setCuisine] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
-  const [instructions, setInstructions] = useState('');    // one step per line
+  const [instructions, setInstructions] = useState(''); // one step per line
   const [ingredients, setIngredients] = useState<string[]>(['']);
   const [visibility, setVisibility] = useState<Visibility>('private');
 
@@ -46,10 +61,7 @@ export default function AddRecipePage() {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s);
     });
-    return () => {
-      mounted = false;
-      sub?.subscription?.unsubscribe();
-    };
+    return () => sub?.subscription?.unsubscribe();
   }, []);
 
   // ------ PREFILL (EDIT MODE) ------
@@ -117,7 +129,9 @@ export default function AddRecipePage() {
 
       setBusy(false);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [isEditing, editId]);
 
   // ------ SUBMIT ------
@@ -164,7 +178,6 @@ export default function AddRecipePage() {
           .eq('user_id', userId); // RLS: only owner updates
         if (upErr) throw upErr;
 
-        // Replace ingredients & steps (simple and reliable)
         const [{ error: d1 }, { error: d2 }] = await Promise.all([
           supabase.from('recipe_ingredients').delete().eq('recipe_id', editId),
           supabase.from('recipe_steps').delete().eq('recipe_id', editId),
@@ -185,12 +198,11 @@ export default function AddRecipePage() {
           if (insStepErr) throw insStepErr;
         }
 
-        // Done
-        router.replace('/cookbook'); // keep your original destination
+        router.replace('/cookbook'); // where you want to land after edit
         return;
       }
 
-      // --- CREATE: use your existing RPC (keeps your backend logic) ---
+      // --- CREATE: your existing RPC ---
       const { error } = await supabase.rpc('add_full_recipe', {
         p_title: title,
         p_cuisine: cuisine || null,
