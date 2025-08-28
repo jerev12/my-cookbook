@@ -1,7 +1,8 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Cropper from 'react-easy-crop';
 import { supabase } from '@/lib/supabaseClient';
 
 type Visibility = 'private' | 'friends' | 'public';
@@ -11,6 +12,41 @@ type IngredientRow = {
   unit?: string | null;
   note?: string | null;
 };
+
+// Utility: crop a File/URL to a Blob using canvas
+async function getCroppedBlob(
+  imageSrc: string,
+  crop: { x: number; y: number; width: number; height: number }
+): Promise<Blob> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image();
+    i.crossOrigin = 'anonymous';
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = imageSrc;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(crop.width);
+  canvas.height = Math.round(crop.height);
+  const ctx = canvas.getContext('2d')!;
+  // drawImage(image, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
+  ctx.drawImage(
+    img,
+    crop.x,
+    crop.y,
+    crop.width,
+    crop.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+
+  return await new Promise<Blob>((resolve) =>
+    canvas.toBlob((b) => resolve(b as Blob), 'image/jpeg', 0.9)
+  );
+}
 
 // ---- Page wrapper: provides the Suspense boundary ----
 export default function AddRecipePage() {
@@ -48,6 +84,20 @@ function AddRecipeForm() {
   const [ingredients, setIngredients] = useState<string[]>(['']);
   const [visibility, setVisibility] = useState<Visibility>('private');
 
+  // photo state
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null); // existing or newly uploaded URL
+  const [localPhotoSrc, setLocalPhotoSrc] = useState<string | null>(null); // object URL for cropper
+  const [showCropper, setShowCropper] = useState(false);
+  const [crop, setCrop] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedPixels, setCroppedPixels] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   // ------ AUTH LOAD ------
   useEffect(() => {
     let mounted = true;
@@ -75,7 +125,7 @@ function AddRecipeForm() {
       // Load base recipe
       const { data: recs, error: recErr } = await supabase
         .from('recipes')
-        .select('id, user_id, title, cuisine, source_url, visibility')
+        .select('id, user_id, title, cuisine, source_url, visibility, photo_url')
         .eq('id', editId)
         .limit(1);
 
@@ -97,6 +147,7 @@ function AddRecipeForm() {
       setCuisine(r.cuisine ?? '');
       setSourceUrl(r.source_url ?? '');
       setVisibility((r.visibility as Visibility) ?? 'private');
+      setPhotoUrl(r.photo_url ?? null);
 
       // Load ingredients and steps
       const [{ data: ingData, error: ingErr }, { data: stepData, error: stepErr }] =
@@ -133,6 +184,68 @@ function AddRecipeForm() {
       mounted = false;
     };
   }, [isEditing, editId]);
+
+  // ------ PHOTO HANDLERS ------
+  function onPickFile() {
+    fileInputRef.current?.click();
+  }
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    setLocalPhotoSrc(url);
+    setShowCropper(true);
+    setZoom(1);
+    setCrop({ x: 0, y: 0 });
+  }
+
+  // react-easy-crop provides pixel area on complete
+  function onCropComplete(_: any, areaPixels: any) {
+    setCroppedPixels(areaPixels);
+  }
+
+  async function confirmCrop() {
+    if (!localPhotoSrc || !croppedPixels) return;
+    try {
+      setBusy(true);
+      const blob = await getCroppedBlob(localPhotoSrc, croppedPixels);
+
+      // Ensure user is signed in
+      const { data: userRes } = await supabase.auth.getUser();
+      const userId = userRes?.user?.id;
+      if (!userId) throw new Error('No signed-in user — please log in again.');
+
+      // Build a stable path; if editing, prefer recipe id
+      const filename = `${isEditing && editId ? editId : crypto.randomUUID()}.jpg`;
+      const path = `${userId}/${filename}`;
+
+      // Upload to Storage
+      const { data: _u, error: upErr } = await supabase.storage
+        .from('recipe-photos')
+        .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+
+      if (upErr) throw upErr;
+
+      // Get public URL (simple start)
+      const { data: pub } = supabase.storage.from('recipe-photos').getPublicUrl(path);
+      setPhotoUrl(pub.publicUrl || null);
+      setShowCropper(false);
+      // clean object URL
+      URL.revokeObjectURL(localPhotoSrc);
+      setLocalPhotoSrc(null);
+    } catch (e: any) {
+      setMsg(e?.message || 'Image upload failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function cancelCrop() {
+    if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc);
+    setLocalPhotoSrc(null);
+    setShowCropper(false);
+  }
 
   // ------ SUBMIT ------
   async function submit() {
@@ -173,6 +286,7 @@ function AddRecipeForm() {
             cuisine: cuisine || null,
             source_url: sourceUrl || null,
             visibility,
+            photo_url: photoUrl || null,
           })
           .eq('id', editId)
           .eq('user_id', userId); // RLS: only owner updates
@@ -198,15 +312,15 @@ function AddRecipeForm() {
           if (insStepErr) throw insStepErr;
         }
 
-        router.replace('/cookbook'); // where you want to land after edit
+        router.replace('/cookbook');
         return;
       }
 
-      // --- CREATE: your existing RPC ---
+      // --- CREATE: your existing RPC, now with photo_url ---
       const { error } = await supabase.rpc('add_full_recipe', {
         p_title: title,
         p_cuisine: cuisine || null,
-        p_photo_url: null,
+        p_photo_url: photoUrl || null,
         p_source_url: sourceUrl || null,
         p_instructions: instructions,
         p_ingredients: ingArray,
@@ -223,6 +337,7 @@ function AddRecipeForm() {
       setInstructions('');
       setIngredients(['']);
       setVisibility('private');
+      setPhotoUrl(null);
       router.replace('/cookbook');
     } catch (err: any) {
       setMsg(err?.message || 'Something went wrong.');
@@ -252,7 +367,7 @@ function AddRecipeForm() {
 
   // ------ CLEANER UI ------
   return (
-    <main style={{ maxWidth: 760, margin: '28px auto', padding: 16 }}>
+    <main style={{ maxWidth: 760, margin: '28px auto', padding: 16, paddingBottom: 96 }}>
       {/* Header */}
       <header
         style={{
@@ -320,8 +435,85 @@ function AddRecipeForm() {
           padding: 16,
           display: 'grid',
           gap: 14,
+          overflow: 'hidden',          // <- keeps inputs “inside” the card
+          boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+          position: 'relative',
         }}
       >
+        {/* Photo */}
+        <div style={{ display: 'grid', gap: 8 }}>
+          <label style={{ fontWeight: 600 }}>Photo</label>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '120px 1fr',
+              gap: 12,
+              alignItems: 'center',
+            }}
+          >
+            <div
+              style={{
+                width: 120,
+                height: 120,
+                borderRadius: 12,
+                overflow: 'hidden',
+                border: '1px solid #e5e7eb',
+                background: '#f8fafc',
+                display: 'grid',
+                placeItems: 'center',
+                fontSize: 12,
+                textAlign: 'center',
+              }}
+            >
+              {photoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  alt="Recipe"
+                  src={photoUrl}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                <span>No photo</span>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={onPickFile}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #cbd5e1',
+                  padding: '8px 12px',
+                  borderRadius: 8,
+                }}
+              >
+                {photoUrl ? 'Change Photo' : 'Upload Photo'}
+              </button>
+              {photoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setShowCropper(true)}
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #cbd5e1',
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                  }}
+                >
+                  Edit Crop
+                </button>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={onFileChange}
+                style={{ display: 'none' }}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Title / Cuisine */}
         <div style={{ display: 'grid', gap: 8 }}>
           <label style={{ fontWeight: 600 }}>Title</label>
@@ -334,6 +526,7 @@ function AddRecipeForm() {
               padding: 10,
               borderRadius: 8,
               border: '1px solid #e5e7eb',
+              background: '#fff',
             }}
           />
         </div>
@@ -349,6 +542,7 @@ function AddRecipeForm() {
               padding: 10,
               borderRadius: 8,
               border: '1px solid #e5e7eb',
+              background: '#fff',
             }}
           />
         </div>
@@ -365,6 +559,7 @@ function AddRecipeForm() {
               padding: 10,
               borderRadius: 8,
               border: '1px solid #e5e7eb',
+              background: '#fff',
             }}
           />
         </div>
@@ -390,6 +585,7 @@ function AddRecipeForm() {
                   padding: 10,
                   borderRadius: 8,
                   border: '1px solid #e5e7eb',
+                  background: '#fff',
                 }}
               />
             ))}
@@ -427,6 +623,7 @@ function AddRecipeForm() {
               border: '1px solid #e5e7eb',
               resize: 'vertical',
               minHeight: 160,
+              background: '#fff',
             }}
           />
         </div>
@@ -460,9 +657,10 @@ function AddRecipeForm() {
           marginTop: 16,
           background: 'linear-gradient(to top, white 70%, transparent)',
           paddingTop: 8,
+          zIndex: 10, // make sure it stays above content
         }}
       >
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', background: '#fff', padding: '8px 0' }}>
           <button
             type="button"
             onClick={() => router.back()}
@@ -492,6 +690,89 @@ function AddRecipeForm() {
           </button>
         </div>
       </div>
+
+      {/* Simple cropper modal */}
+      {showCropper && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 50,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              width: 'min(92vw, 520px)',
+              background: '#fff',
+              borderRadius: 12,
+              overflow: 'hidden',
+              border: '1px solid #e5e7eb',
+            }}
+          >
+            <div style={{ padding: 12, borderBottom: '1px solid #f1f5f9', fontWeight: 600 }}>
+              Adjust Photo
+            </div>
+            <div style={{ position: 'relative', height: 360 }}>
+              {localPhotoSrc && (
+                <Cropper
+                  image={localPhotoSrc}
+                  crop={crop}
+                  zoom={zoom}
+                  aspect={1}
+                  onCropChange={setCrop}
+                  onZoomChange={setZoom}
+                  onCropComplete={onCropComplete}
+                  restrictPosition={false}
+                  cropShape="rect"
+                  showGrid={false}
+                />
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 12 }}>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.01}
+                value={zoom}
+                onChange={(e) => setZoom(parseFloat(e.target.value))}
+                style={{ flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={cancelCrop}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 8,
+                  padding: '8px 12px',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmCrop}
+                style={{
+                  background: '#111827',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 8,
+                  padding: '8px 12px',
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
