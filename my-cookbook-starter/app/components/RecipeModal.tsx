@@ -21,6 +21,13 @@ type Ingredient = {
   note: string | null;
 };
 
+type Profile = {
+  id: string;
+  display_name: string | null;
+  nickname: string | null;
+  avatar_url: string | null;
+};
+
 function isSameLocalDate(a: Date, b: Date) {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -48,6 +55,9 @@ export default function RecipeModal({
   const [steps, setSteps] = useState<Step[]>([]);
   const [ings, setIngs] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // author
+  const [author, setAuthor] = useState<Profile | null>(null);
 
   // viewer & ownership
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -88,6 +98,15 @@ export default function RecipeModal({
       const uid = authData?.user?.id ?? null;
       if (!mounted) return;
       setCurrentUserId(uid);
+
+      // author profile
+      const { data: profs } = await supabase
+        .from('profiles')
+        .select('id, display_name, nickname, avatar_url')
+        .eq('id', recipe.user_id)
+        .limit(1);
+      if (!mounted) return;
+      setAuthor((profs?.[0] as Profile) ?? null);
 
       // ingredients & steps
       const [{ data: stepData }, { data: ingData }] = await Promise.all([
@@ -216,6 +235,10 @@ export default function RecipeModal({
 
   if (!open || !recipe) return null;
 
+  // helper: display name
+  const authorName =
+    author?.display_name || author?.nickname || 'Unknown user';
+
   return (
     <div
       style={{
@@ -237,57 +260,104 @@ export default function RecipeModal({
           width: 'min(800px, 94vw)',
           background: '#fff',
           borderRadius: 12,
-          padding: 0,                // we’ll pad inner sections instead
+          padding: 0,
           display: 'flex',
           flexDirection: 'column',
           maxHeight: '90vh',
-          overflow: 'hidden',        // content scrolls; header/footer fixed
+          overflow: 'hidden',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* Header (author + title / cuisine + X) */}
         <div
           style={{
             padding: '12px 16px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
             borderBottom: '1px solid #eee',
           }}
         >
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
-            <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            title="Close"
+          {/* Author row */}
+          {author && (
+            <a
+              href={`/profile/${author.id}`} // ← adjust if your user route differs
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                textDecoration: 'none',
+                marginBottom: 8,
+              }}
+            >
+              {author.avatar_url ? (
+                <img
+                  src={author.avatar_url}
+                  alt={authorName}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    objectFit: 'cover',
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    background: '#e5e7eb',
+                  }}
+                  aria-hidden="true"
+                />
+              )}
+              <span style={{ color: '#111827', fontWeight: 600, fontSize: 14 }}>
+                {authorName}
+              </span>
+            </a>
+          )}
+
+          {/* Title row with X on right */}
+          <div
             style={{
-              background: 'none',
-              border: 'none',
-              padding: 0,
-              cursor: 'pointer',
-              color: '#111827', // black-ish
               display: 'flex',
+              justifyContent: 'space-between',
               alignItems: 'center',
-              justifyContent: 'center',
-              lineHeight: 0,
+              gap: 12,
             }}
           >
-            {/* 24px X icon */}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
+              <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
+            </div>
+            <button
+              onClick={onClose}
+              aria-label="Close"
+              title="Close"
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
+                color: '#111827',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                lineHeight: 0,
+              }}
             >
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
+              {/* 24px X icon */}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Content */}
@@ -358,7 +428,7 @@ export default function RecipeModal({
           <div style={{ fontSize: 12, color: '#6b7280' }}>{addedText ?? ''}</div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {/* Heart */}
+            {/* Heart — reverted to your earlier look */}
             <button
               onClick={toggleHeart}
               disabled={!currentUserId || busyHeart}
@@ -376,7 +446,7 @@ export default function RecipeModal({
               aria-label={didHeart ? 'Remove heart' : 'Add heart'}
               title={didHeart ? 'Unheart' : 'Heart'}
             >
-              {/* Better heart icon (fills nicely) */}
+              {/* The original heart path you had before */}
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -386,7 +456,7 @@ export default function RecipeModal({
                 stroke="currentColor"
                 strokeWidth="2"
               >
-                <path d="M12.1 21.35c-.07.05-.15.05-.22 0C7.14 17.86 4 15.17 2.28 12.64 1.04 10.83 1.3 8.3 3 6.86a5.01 5.01 0 0 1 6.4.37l.6.6.6-.6a5.01 5.01 0 0 1 6.4-.37c1.7 1.44 1.96 3.97.72 5.78-1.72 2.53-4.86 5.22-9.22 8.71z" />
+                <path d="M12 21c-4.8-3.7-8-6.4-8-10a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 3.6-3.2 6.3-8 10z" />
               </svg>
               <span style={{ fontSize: 14 }}>{heartCount}</span>
             </button>
