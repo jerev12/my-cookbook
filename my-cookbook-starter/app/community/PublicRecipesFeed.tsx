@@ -1,248 +1,118 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import Modal from '../components/Modal'; // adjust if your Modal path differs
-import RecipeCard from '../components/RecipeCard';
+import RecipeModal from '@/components/RecipeModal';
 
-type Profile = {
+type Recipe = {
   id: string;
-  display_name: string | null;
-  nickname: string | null;
-  avatar_url: string | null;
-};
-
-type RecipeRow = {
-  id: string;
-  user_id: string;
   title: string;
   cuisine: string | null;
-  created_at: string | null;
   photo_url: string | null;
-  instructions: string | null;
-  visibility: string;
+  source_url: string | null;
 };
 
 export default function PublicRecipesFeed() {
-  // list
-  const [rows, setRows] = useState<RecipeRow[]>([]);
-  const [profilesMap, setProfilesMap] = useState<Record<string, Profile>>({});
+  // list state
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // modal/detail
-  const [open, setOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [detailRecipe, setDetailRecipe] = useState<RecipeRow | null>(null);
-  const [detailAuthor, setDetailAuthor] = useState<Profile | null>(null);
+  // modal state (shared RecipeModal)
+  const [selected, setSelected] = useState<Recipe | null>(null);
 
-  // pre-hydrated meta
-  const [initialHeartCount, setInitialHeartCount] = useState<number>(0);
-  const [initialDidHeart, setInitialDidHeart] = useState<boolean>(false);
-  const [initialDidSave, setInitialDidSave] = useState<boolean>(false);
-  const [initialBookmarkCountForOwner, setInitialBookmarkCountForOwner] =
-    useState<number | undefined>(undefined);
-
-  // load list
   useEffect(() => {
-    let mounted = true;
-    async function loadList() {
+    (async () => {
       setLoading(true);
+      setErrorMsg(null);
 
-      const { data: recs } = await supabase
+      const { data, error } = await supabase
         .from('recipes')
-        .select('id, user_id, title, cuisine, photo_url, instructions, created_at, visibility')
+        .select('id, title, cuisine, photo_url, source_url')
         .eq('visibility', 'public')
-        .order('created_at', { ascending: false })
-        .limit(120);
+        .order('created_at', { ascending: false });
 
-      const recipes = (recs ?? []) as RecipeRow[];
-      if (!mounted) return;
-      setRows(recipes);
-
-      const authorIds = Array.from(new Set(recipes.map(r => r.user_id)));
-      if (authorIds.length) {
-        const { data: profs } = await supabase
-          .from('profiles')
-          .select('id, display_name, nickname, avatar_url')
-          .in('id', authorIds);
-        if (mounted) {
-          const map: Record<string, Profile> = {};
-          for (const p of (profs ?? []) as Profile[]) map[p.id] = p;
-          setProfilesMap(map);
-        }
+      if (error) {
+        setErrorMsg(error.message);
+        setRecipes([]);
       } else {
-        if (mounted) setProfilesMap({});
+        setRecipes((data as Recipe[]) ?? []);
       }
 
       setLoading(false);
-    }
-    loadList();
-    return () => { mounted = false; };
+    })();
   }, []);
 
-  // open modal + load detail
-  async function openRecipe(id: string) {
-    setSelectedId(id);
-    setOpen(true);
-    setDetailLoading(true);
-
-    const { data: authData } = await supabase.auth.getUser();
-    const uid = authData?.user?.id ?? null;
-    setCurrentUserId(uid);
-
-    const { data: recs } = await supabase
-      .from('recipes')
-      .select('id, user_id, title, cuisine, photo_url, instructions, created_at, visibility')
-      .eq('id', id)
-      .limit(1);
-    const row = (recs?.[0] as RecipeRow) ?? null;
-    setDetailRecipe(row);
-
-    if (row) {
-      const existing = profilesMap[row.user_id];
-      if (existing) {
-        setDetailAuthor(existing);
-      } else {
-        const { data: profs } = await supabase
-          .from('profiles')
-          .select('id, display_name, nickname, avatar_url')
-          .eq('id', row.user_id)
-          .limit(1);
-        setDetailAuthor((profs?.[0] as Profile) ?? null);
-      }
-
-      const { data: heartRows } = await supabase
-        .from('recipe_hearts')
-        .select('recipe_id')
-        .eq('recipe_id', row.id);
-      setInitialHeartCount((heartRows ?? []).length);
-
-      if (uid) {
-        const { data: myHeart } = await supabase
-          .from('recipe_hearts')
-          .select('recipe_id')
-          .eq('recipe_id', row.id)
-          .eq('user_id', uid)
-          .limit(1);
-        setInitialDidHeart(!!myHeart?.length);
-
-        const { data: mySave } = await supabase
-          .from('recipe_bookmarks')
-          .select('recipe_id')
-          .eq('recipe_id', row.id)
-          .eq('user_id', uid)
-          .limit(1);
-        setInitialDidSave(!!mySave?.length);
-
-        if (row.user_id === uid) {
-          const { data: bmRows } = await supabase
-            .from('recipe_bookmarks')
-            .select('recipe_id')
-            .eq('recipe_id', row.id);
-          setInitialBookmarkCountForOwner((bmRows ?? []).length);
-        } else {
-          setInitialBookmarkCountForOwner(undefined);
-        }
-      } else {
-        setInitialDidHeart(false);
-        setInitialDidSave(false);
-        setInitialBookmarkCountForOwner(undefined);
-      }
-    } else {
-      setDetailAuthor(null);
-      setInitialHeartCount(0);
-      setInitialDidHeart(false);
-      setInitialDidSave(false);
-      setInitialBookmarkCountForOwner(undefined);
-    }
-
-    setDetailLoading(false);
+  function openRecipe(r: Recipe) {
+    setSelected(r); // RecipeModal will load steps/ingredients internally
   }
 
-  function closeModal() {
-    setOpen(false);
-  }
+  return (
+    <main style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
+      <h1 style={{ margin: 0, fontSize: 22, marginBottom: 12 }}>
+        Community — Public Recipes
+      </h1>
 
-  const content = useMemo(() => {
-    if (loading) return <p className="text-sm text-gray-600">Loading public recipes…</p>;
-    if (!rows.length) return <p className="text-sm text-gray-600">No public recipes yet.</p>;
-
-    return (
-      <ul className="divide-y divide-gray-200 rounded-lg border border-gray-200 bg-white">
-        {rows.map((r) => {
-          const author = profilesMap[r.user_id];
-          const byline = author?.display_name || author?.nickname || 'Unknown user';
-          return (
-            <li key={r.id} className="p-3 hover:bg-gray-50 transition">
+      {/* LIST */}
+      {loading ? (
+        <div>Loading public recipes…</div>
+      ) : errorMsg ? (
+        <div style={{ color: '#b42318' }}>{errorMsg}</div>
+      ) : recipes.length === 0 ? (
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #eee',
+            borderRadius: 12,
+            padding: 16,
+            color: '#606375',
+          }}
+        >
+          No public recipes yet.
+        </div>
+      ) : (
+        <ul
+          style={{
+            listStyle: 'none',
+            padding: 0,
+            margin: 0,
+            background: '#fff',
+            border: '1px solid #eee',
+            borderRadius: 12,
+            overflow: 'hidden',
+          }}
+        >
+          {recipes.map((r) => (
+            <li key={r.id} style={{ borderTop: '1px solid #eee' }}>
               <button
                 type="button"
-                onClick={() => openRecipe(r.id)}
-                className="block w-full text-left"
+                onClick={() => openRecipe(r)}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  padding: 12,
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                }}
                 aria-label={`Open ${r.title}`}
               >
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                  <span className="font-semibold text-gray-900 truncate">{r.title}</span>
-                  <span className="text-xs text-gray-500">
-                    {r.cuisine ? `${r.cuisine} • ` : ''}by {byline}
-                  </span>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{r.title}</div>
+                <div style={{ color: '#666', fontSize: 12 }}>
+                  {r.cuisine || '—'}
                 </div>
               </button>
             </li>
-          );
-        })}
-      </ul>
-    );
-  }, [loading, rows, profilesMap]);
+          ))}
+        </ul>
+      )}
 
-  return (
-    <main className="p-4">
-      <h1 className="text-lg font-semibold mb-4">Community — Public Recipes</h1>
-      {content}
-
-      <Modal open={open} onClose={closeModal} title="Recipe">
-        {selectedId && (
-          <div className="mb-3">
-            <Link href={`/recipes/${selectedId}`} className="text-xs text-blue-600 hover:underline">
-              Open full page →
-            </Link>
-          </div>
-        )}
-
-        {detailLoading && <p className="text-sm text-gray-600">Loading…</p>}
-        {!detailLoading && !detailRecipe && (
-          <p className="text-sm text-gray-600">Recipe not found or not visible.</p>
-        )}
-        {!detailLoading && detailRecipe && (
-          <div className="max-w-2xl">
-            <RecipeCard
-              id={detailRecipe.id}
-              title={detailRecipe.title}
-              cuisine={detailRecipe.cuisine}
-              photo_url={detailRecipe.photo_url}
-              instructions={detailRecipe.instructions}
-              created_at={detailRecipe.created_at}
-              author={
-                detailAuthor
-                  ? {
-                      id: detailAuthor.id,
-                      display_name: detailAuthor.display_name,
-                      nickname: detailAuthor.nickname,
-                      avatar_url: detailAuthor.avatar_url,
-                    }
-                  : null
-              }
-              currentUserId={currentUserId}
-              initialHeartCount={initialHeartCount}
-              initialDidHeart={initialDidHeart}
-              initialDidSave={initialDidSave}
-              initialBookmarkCountForOwner={initialBookmarkCountForOwner}
-            />
-          </div>
-        )}
-      </Modal>
+      {/* Shared Recipe Modal (closes on backdrop, X, or onClose) */}
+      <RecipeModal
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        recipe={selected}
+      />
     </main>
   );
 }
