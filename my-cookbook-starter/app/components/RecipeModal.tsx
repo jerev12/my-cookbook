@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Modal from '../components/Modal';
 import { supabase } from '@/lib/supabaseClient';
 
 type Recipe = {
@@ -33,7 +32,7 @@ export default function RecipeModal({
   const [ings, setIngs] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Load details whenever a (new) recipe opens
+  // Load details when opened with a recipe
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -55,86 +54,108 @@ export default function RecipeModal({
       setIngs((ingData as Ingredient[]) || []);
       setLoading(false);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [open, recipe]);
 
+  if (!open || !recipe) return null;
+
   return (
-    <Modal open={open} onClose={onClose} title="Recipe">
-      {!recipe ? (
-        <p className="text-sm text-gray-600">No recipe selected.</p>
-      ) : (
-        <div>
-          {/* Header (matches your My Cookbook layout) */}
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xl font-bold">{recipe.title}</div>
-              <div className="text-gray-600">{recipe.cuisine || ''}</div>
-            </div>
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              className="rounded border px-2 py-1 text-sm hover:bg-gray-50"
-            >
-              ✕
-            </button>
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,.5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 12,
+        zIndex: 50,
+      }}
+      onClick={onClose}
+      aria-modal="true"
+      role="dialog"
+    >
+      <div
+        style={{
+          width: 'min(800px, 94vw)',
+          background: '#fff',
+          borderRadius: 12,
+          padding: 16,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
+            <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
           </div>
-
-          {/* Body */}
-          <div className="grid gap-3 mt-3">
-            <section>
-              <h3 className="font-semibold my-2">Ingredients</h3>
-              {loading ? (
-                <div>Loading…</div>
-              ) : (
-                <ul className="list-disc pl-5">
-                  {ings.length ? (
-                    ings.map((i, idx) => {
-                      const qty = i.quantity ?? '';
-                      const parts = [qty, i.unit, i.item_name]
-                        .filter(Boolean)
-                        .join(' ');
-                      return (
-                        <li key={idx}>
-                          {parts}
-                          {i.note ? ` (${i.note})` : ''}
-                        </li>
-                      );
-                    })
-                  ) : (
-                    <li>No ingredients yet.</li>
-                  )}
-                </ul>
-              )}
-            </section>
-
-            <section>
-              <h3 className="font-semibold my-2">Instructions</h3>
-              {loading ? (
-                <div>Loading…</div>
-              ) : (
-                <ol className="list-decimal pl-5">
-                  {steps.length ? (
-                    steps.map((s, idx) => <li key={idx}>{s.body}</li>)
-                  ) : (
-                    <li>This recipe has no steps yet.</li>
-                  )}
-                </ol>
-              )}
-            </section>
-
-            {recipe.source_url ? (
-              <a
-                href={recipe.source_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-emerald-600"
-              >
-                Open Source
-              </a>
-            ) : null}
-          </div>
+          <button onClick={onClose} aria-label="Close">
+            ✕
+          </button>
         </div>
-      )}
-    </Modal>
+
+        {/* Body */}
+        <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
+          <section>
+            <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
+            {loading ? (
+              <div>Loading…</div>
+            ) : (
+              <ul style={{ paddingLeft: 16 }}>
+                {ings.length ? (
+                  ings.map((i, idx) => {
+                    const qty = i.quantity ?? '';
+                    const parts = [qty, i.unit, i.item_name].filter(Boolean).join(' ');
+                    return (
+                      <li key={idx}>
+                        {parts}
+                        {i.note ? ` (${i.note})` : ''}
+                      </li>
+                    );
+                  })
+                ) : (
+                  <li>No ingredients yet.</li>
+                )}
+              </ul>
+            )}
+          </section>
+
+          <section>
+            <h3 style={{ margin: '8px 0' }}>Instructions</h3>
+            {loading ? (
+              <div>Loading…</div>
+            ) : (
+              <ol style={{ paddingLeft: 18 }}>
+                {steps.length ? (
+                  steps.map((s, idx) => <li key={idx}>{s.body}</li>)
+                ) : (
+                  <li>This recipe has no steps yet.</li>
+                )}
+              </ol>
+            )}
+          </section>
+
+          {recipe.source_url ? (
+            <a
+              href={recipe.source_url}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: '#0b5' }}
+            >
+              Open Source
+            </a>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
