@@ -14,8 +14,6 @@ type IngredientRow = {
 };
 
 /* ---------- Helpers ---------- */
-
-// Canvas-crop a loaded image (by pixel area) to a JPEG Blob
 async function getCroppedBlob(
   imageSrc: string,
   crop: { x: number; y: number; width: number; height: number }
@@ -49,9 +47,6 @@ async function getCroppedBlob(
   );
 }
 
-/** Extract the storage path from a Supabase public URL:
- *  /storage/v1/object/public/recipe-photos/<path>  ->  <path>
- */
 function storagePathFromPublicUrl(publicUrl: string): string | null {
   try {
     const u = new URL(publicUrl);
@@ -65,7 +60,6 @@ function storagePathFromPublicUrl(publicUrl: string): string | null {
 }
 
 /* ---------- Page wrapper ---------- */
-
 export default function AddRecipePage() {
   return (
     <Suspense
@@ -80,8 +74,17 @@ export default function AddRecipePage() {
   );
 }
 
-/* ---------- Main component ---------- */
+/* ---------- Reusable field styles (smaller, comfy) ---------- */
+const fieldStyle: React.CSSProperties = {
+  width: '100%',
+  padding: 8,            // smaller padding so it doesn’t touch card edges visually
+  borderRadius: 6,       // a bit tighter
+  border: '1px solid #e5e7eb',
+  background: '#fff',
+  boxSizing: 'border-box',
+};
 
+/* ---------- Main component ---------- */
 function AddRecipeForm() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -97,15 +100,15 @@ function AddRecipeForm() {
   // form state
   const [title, setTitle] = useState('');
   const [cuisine, setCuisine] = useState('');
-  const [sourceUrl, setSourceUrl] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');    // label changes to “Recipe URL”
   const [instructions, setInstructions] = useState(''); // one step per line
   const [ingredients, setIngredients] = useState<string[]>(['']);
   const [visibility, setVisibility] = useState<Visibility>('private');
 
   // photo state
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null); // public URL
-  const oldPhotoPathRef = useRef<string | null>(null);           // storage path of current photo
-  const [localPhotoSrc, setLocalPhotoSrc] = useState<string | null>(null); // object URL for cropper
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const oldPhotoPathRef = useRef<string | null>(null);
+  const [localPhotoSrc, setLocalPhotoSrc] = useState<string | null>(null);
   const [showCropper, setShowCropper] = useState(false);
   const [crop, setCrop] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -138,7 +141,6 @@ function AddRecipeForm() {
       setMsg(null);
       setBusy(true);
 
-      // Load base recipe (now includes photo_url)
       const { data: recs, error: recErr } = await supabase
         .from('recipes')
         .select('id, user_id, title, cuisine, source_url, visibility, photo_url')
@@ -158,7 +160,6 @@ function AddRecipeForm() {
         return;
       }
 
-      // Set form
       setTitle(r.title ?? '');
       setCuisine(r.cuisine ?? '');
       setSourceUrl(r.source_url ?? '');
@@ -166,7 +167,6 @@ function AddRecipeForm() {
       setPhotoUrl(r.photo_url ?? null);
       oldPhotoPathRef.current = r.photo_url ? storagePathFromPublicUrl(r.photo_url) : null;
 
-      // Load ingredients & steps
       const [{ data: ingData, error: ingErr }, { data: stepData, error: stepErr }] =
         await Promise.all([
           supabase.from('recipe_ingredients').select('item_name').eq('recipe_id', editId),
@@ -174,7 +174,6 @@ function AddRecipeForm() {
         ]);
 
       if (!mounted) return;
-
       if (ingErr || stepErr) {
         setMsg(ingErr?.message || stepErr?.message || 'Failed to load ingredients/steps.');
         setBusy(false);
@@ -198,7 +197,6 @@ function AddRecipeForm() {
   function onPickFile() {
     fileInputRef.current?.click();
   }
-
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -208,7 +206,6 @@ function AddRecipeForm() {
     setZoom(1);
     setCrop({ x: 0, y: 0 });
   }
-
   function onCropComplete(_: any, areaPixels: any) {
     setCroppedPixels(areaPixels);
   }
@@ -221,27 +218,22 @@ function AddRecipeForm() {
 
       const blob = await getCroppedBlob(localPhotoSrc, croppedPixels);
 
-      // Ensure user is signed in
       const { data: userRes } = await supabase.auth.getUser();
       const userId = userRes?.user?.id;
       if (!userId) throw new Error('No signed-in user — please log in again.');
 
-      // Use unique filename each time (avoid CDN cache)
       const base = (sp.get('id') || crypto.randomUUID()).toString();
       const filename = `${base}-${Date.now()}.jpg`;
       const newPath = `${userId}/${filename}`;
 
-      // 1) Upload new file
       const upRes = await supabase.storage
         .from('recipe-photos')
         .upload(newPath, blob, { contentType: 'image/jpeg' });
       if (upRes.error) throw upRes.error;
 
-      // 2) Get its public URL
       const { data: pub } = supabase.storage.from('recipe-photos').getPublicUrl(newPath);
       const newPublicUrl = pub.publicUrl;
 
-      // 3) If editing, persist immediately
       if (isEditing && editId) {
         const { error: upErr } = await supabase
           .from('recipes')
@@ -251,19 +243,14 @@ function AddRecipeForm() {
         if (upErr) throw upErr;
       }
 
-      // 4) Swap UI to new image
       setPhotoUrl(newPublicUrl);
 
-      // 5) Delete previous file if any
       const prevPath = oldPhotoPathRef.current;
       if (prevPath && prevPath !== newPath) {
         await supabase.storage.from('recipe-photos').remove([prevPath]);
       }
-
-      // 6) Update ref to new file
       oldPhotoPathRef.current = newPath;
 
-      // 7) Close cropper & cleanup
       setShowCropper(false);
       URL.revokeObjectURL(localPhotoSrc);
       setLocalPhotoSrc(null);
@@ -289,14 +276,12 @@ function AddRecipeForm() {
       const userId = userRes?.user?.id;
       if (!userId) throw new Error('No signed-in user — please log in again.');
 
-      // Delete file if we know the path
       const path = oldPhotoPathRef.current || storagePathFromPublicUrl(photoUrl);
       if (path) {
         const { error: delErr } = await supabase.storage.from('recipe-photos').remove([path]);
         if (delErr) throw delErr;
       }
 
-      // Clear DB if editing
       if (isEditing && editId) {
         const { error: upErr } = await supabase
           .from('recipes')
@@ -346,7 +331,6 @@ function AddRecipeForm() {
 
     try {
       if (isEditing && editId) {
-        // UPDATE base row
         const { error: upErr } = await supabase
           .from('recipes')
           .update({
@@ -360,7 +344,6 @@ function AddRecipeForm() {
           .eq('user_id', userId);
         if (upErr) throw upErr;
 
-        // Replace ingredients/steps
         const [{ error: d1 }, { error: d2 }] = await Promise.all([
           supabase.from('recipe_ingredients').delete().eq('recipe_id', editId),
           supabase.from('recipe_steps').delete().eq('recipe_id', editId),
@@ -385,7 +368,6 @@ function AddRecipeForm() {
         return;
       }
 
-      // CREATE via RPC (includes photo_url)
       const { error } = await supabase.rpc('add_full_recipe', {
         p_title: title,
         p_cuisine: cuisine || null,
@@ -399,7 +381,6 @@ function AddRecipeForm() {
 
       if (error) throw error;
 
-      // Reset + go back
       setTitle('');
       setCuisine('');
       setSourceUrl('');
@@ -503,30 +484,29 @@ function AddRecipeForm() {
           background: '#fff',
           border: '1px solid #eee',
           borderRadius: 12,
-          padding: 16,
+          padding: 14,            // slightly tighter
           display: 'grid',
-          gap: 14,
-          overflow: 'hidden', // keep inputs inside
-          boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+          gap: 12,
+          overflow: 'visible',    // allow inner rounding/shadows to breathe
           position: 'relative',
         }}
       >
         {/* Photo */}
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Photo</label>
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: '120px 1fr',
-              gap: 12,
+              gridTemplateColumns: '110px 1fr',
+              gap: 10,
               alignItems: 'center',
             }}
           >
             <div
               style={{
-                width: 120,
-                height: 120,
-                borderRadius: 12,
+                width: 110,
+                height: 110,
+                borderRadius: 10,
                 overflow: 'hidden',
                 border: '1px solid #e5e7eb',
                 background: '#f8fafc',
@@ -603,62 +583,44 @@ function AddRecipeForm() {
         </div>
 
         {/* Title */}
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Title</label>
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="e.g., Spicy Chicken Tacos"
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 8,
-              border: '1px solid #e5e7eb',
-              background: '#fff',
-            }}
+            style={fieldStyle}
           />
         </div>
 
         {/* Cuisine */}
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Cuisine</label>
           <input
             value={cuisine}
             onChange={(e) => setCuisine(e.target.value)}
             placeholder="e.g., Mexican"
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 8,
-              border: '1px solid #e5e7eb',
-              background: '#fff',
-            }}
+            style={fieldStyle}
           />
         </div>
 
-        {/* Source URL */}
-        <div style={{ display: 'grid', gap: 8 }}>
-          <label style={{ fontWeight: 600 }}>Source URL (optional)</label>
+        {/* Recipe URL (optional) */}
+        <div style={{ display: 'grid', gap: 6 }}>
+          <label style={{ fontWeight: 600 }}>
+            Recipe URL <span style={{ color: '#6b7280', fontWeight: 400 }}>(optional)</span>
+          </label>
           <input
             value={sourceUrl}
             onChange={(e) => setSourceUrl(e.target.value)}
             placeholder="https://example.com"
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 8,
-              border: '1px solid #e5e7eb',
-              background: '#fff',
-            }}
+            style={fieldStyle}
           />
         </div>
 
-        {/* Ingredients */}
-        <div style={{ display: 'grid', gap: 8 }}>
-          <label style={{ fontWeight: 600 }}>
-            Ingredients <span style={{ color: '#6b7280' }}>(one per line or add more boxes)</span>
-          </label>
-          <div style={{ display: 'grid', gap: 8 }}>
+        {/* Ingredients (no helper text) */}
+        <div style={{ display: 'grid', gap: 6 }}>
+          <label style={{ fontWeight: 600 }}>Ingredients</label>
+          <div style={{ display: 'grid', gap: 6 }}>
             {ingredients.map((val, idx) => (
               <input
                 key={idx}
@@ -669,13 +631,7 @@ function AddRecipeForm() {
                   setIngredients(copy);
                 }}
                 placeholder={`Ingredient ${idx + 1}`}
-                style={{
-                  width: '100%',
-                  padding: 10,
-                  borderRadius: 8,
-                  border: '1px solid #e5e7eb',
-                  background: '#fff',
-                }}
+                style={fieldStyle}
               />
             ))}
           </div>
@@ -696,40 +652,26 @@ function AddRecipeForm() {
         </div>
 
         {/* Instructions */}
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>
-            Instructions <span style={{ color: '#6b7280' }}>(one step per line)</span>
+            Instructions <span style={{ color: '#6b7280', fontWeight: 400 }}>(one step per line)</span>
           </label>
           <textarea
             value={instructions}
             onChange={(e) => setInstructions(e.target.value)}
-            rows={8}
+            rows={7}
             placeholder={`1. Preheat oven...\n2. Mix dry ingredients...\n3. ...`}
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 8,
-              border: '1px solid #e5e7eb',
-              resize: 'vertical',
-              minHeight: 160,
-              background: '#fff',
-            }}
+            style={{ ...fieldStyle, resize: 'vertical', minHeight: 140 }}
           />
         </div>
 
         {/* Visibility */}
-        <div style={{ display: 'grid', gap: 8 }}>
+        <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Visibility</label>
           <select
             value={visibility}
             onChange={(e) => setVisibility(e.target.value as Visibility)}
-            style={{
-              width: '100%',
-              padding: 10,
-              borderRadius: 8,
-              border: '1px solid #e5e7eb',
-              background: '#fff',
-            }}
+            style={fieldStyle}
           >
             <option value="private">Private (only you)</option>
             <option value="friends">Friends (your friends)</option>
@@ -802,11 +744,14 @@ function AddRecipeForm() {
               borderRadius: 12,
               overflow: 'hidden',
               border: '1px solid #e5e7eb',
+              display: 'grid',
+              gridTemplateRows: 'auto 1fr auto', // header / crop area / footer
             }}
           >
             <div style={{ padding: 12, borderBottom: '1px solid #f1f5f9', fontWeight: 600 }}>
               Adjust Photo
             </div>
+
             <div style={{ position: 'relative', height: 360 }}>
               {localPhotoSrc && (
                 <Cropper
@@ -823,45 +768,53 @@ function AddRecipeForm() {
                 />
               )}
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: 12 }}>
-              <input
-                type="range"
-                min={1}
-                max={3}
-                step={0.01}
-                value={zoom}
-                onChange={(e) => setZoom(parseFloat(e.target.value))}
-                style={{ flex: 1 }}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc);
-                  setLocalPhotoSrc(null);
-                  setShowCropper(false);
-                }}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 8,
-                  padding: '8px 12px',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmCrop}
-                style={{
-                  background: '#111827',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 8,
-                  padding: '8px 12px',
-                }}
-              >
-                Save
-              </button>
+
+            {/* Modal footer: two equal buttons that fill the width */}
+            <div style={{ padding: 12, borderTop: '1px solid #f1f5f9' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'center' }}>
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.01}
+                  value={zoom}
+                  onChange={(e) => setZoom(parseFloat(e.target.value))}
+                  style={{ gridColumn: '1 / -1', width: '100%' }}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc);
+                    setLocalPhotoSrc(null);
+                    setShowCropper(false);
+                  }}
+                  style={{
+                    width: '100%',
+                    background: 'transparent',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={confirmCrop}
+                  style={{
+                    width: '100%',
+                    background: '#111827',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 8,
+                    padding: '10px 12px',
+                  }}
+                >
+                  Save
+                </button>
+              </div>
             </div>
           </div>
         </div>
