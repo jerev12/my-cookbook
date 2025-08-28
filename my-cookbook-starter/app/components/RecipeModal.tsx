@@ -5,12 +5,12 @@ import { supabase } from '@/lib/supabaseClient';
 
 type Recipe = {
   id: string;
-  user_id: string;           // ← make sure we have this
+  user_id: string;
   title: string;
   cuisine: string | null;
   photo_url: string | null;
   source_url: string | null;
-  created_at: string | null; // ← and this
+  created_at: string | null;
 };
 
 type Step = { step_number: number; body: string };
@@ -61,7 +61,7 @@ export default function RecipeModal({
 
   const [didSave, setDidSave] = useState<boolean>(false);
   const [busySave, setBusySave] = useState<boolean>(false);
-  const [bookmarkCount, setBookmarkCount] = useState<number>(0); // only shown if owner
+  const [bookmarkCount, setBookmarkCount] = useState<number>(0); // owner only display
 
   // added on text
   const addedText = useMemo(() => {
@@ -174,7 +174,6 @@ export default function RecipeModal({
         if (error) throw error;
       }
     } catch {
-      // rollback
       setDidHeart(!next);
       setHeartCount(c => Math.max(0, c + (next ? -1 : 1)));
     } finally {
@@ -204,7 +203,6 @@ export default function RecipeModal({
         if (error) throw error;
       }
     } catch {
-      // rollback
       setDidSave(!next);
       if (isOwner) setBookmarkCount(c => Math.max(0, c + (next ? -1 : 1)));
     } finally {
@@ -253,55 +251,6 @@ export default function RecipeModal({
           </div>
           <button onClick={onClose} aria-label="Close">
             ✕
-          </button>
-        </div>
-
-        {/* Actions: Heart & Bookmark */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-          <button
-            type="button"
-            onClick={toggleHeart}
-            disabled={!currentUserId || busyHeart}
-            aria-pressed={didHeart}
-            aria-label={didHeart ? 'Remove heart' : 'Add heart'}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid #eee',
-              background: '#fff',
-              color: didHeart ? '#dc2626' : '#374151',
-              opacity: !currentUserId || busyHeart ? 0.6 : 1,
-              cursor: !currentUserId || busyHeart ? 'not-allowed' : 'pointer',
-            }}
-          >
-            ♥
-            <span>{heartCount}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={toggleSave}
-            disabled={!currentUserId || busySave}
-            aria-pressed={didSave}
-            aria-label={didSave ? 'Remove bookmark' : 'Add bookmark'}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid #eee',
-              background: '#fff',
-              color: didSave ? '#2563eb' : '#374151',
-              opacity: !currentUserId || busySave ? 0.6 : 1,
-              cursor: !currentUserId || busySave ? 'not-allowed' : 'pointer',
-            }}
-          >
-            🔖
-            {isOwner ? <span>{bookmarkCount}</span> : <span>{didSave ? 'Saved' : 'Save'}</span>}
           </button>
         </div>
 
@@ -360,12 +309,114 @@ export default function RecipeModal({
           ) : null}
         </div>
 
-        {/* Added on */}
-        {addedText && (
-          <div style={{ marginTop: 12, fontSize: 12, color: '#6b7280' }}>
-            {addedText}
+        {/* Footer row — Added on (left) + Actions (right) */}
+        <div
+          style={{
+            marginTop: 12,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          {/* Added on text (left) */}
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            {addedText ?? ''}
           </div>
-        )}
+
+          {/* Actions (right) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Heart */}
+            <button
+              type="button"
+              onClick={toggleHeart}
+              disabled={!currentUserId || busyHeart}
+              aria-pressed={didHeart}
+              aria-label={didHeart ? 'Remove heart' : 'Add heart'}
+              title={didHeart ? 'Unheart' : 'Heart'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 10px',
+                borderRadius: 8,
+                border: '1px solid #eee',
+                background: '#fff',
+                color: didHeart ? '#dc2626' : '#374151',
+                opacity: !currentUserId || busyHeart ? 0.6 : 1,
+                cursor: !currentUserId || busyHeart ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {/* Heart icon 24px, filled when didHeart */}
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                style={{ display: 'block' }}
+                fill={didHeart ? 'currentColor' : 'none'}
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M12 21s-7-4.534-9.5-7.5C.5 11.5 2 7 6 7c2.1 0 3.5 1.1 4 2 0.5-.9 1.9-2 4-2 4 0 5.5 4.5 3.5 6.5C19 16.466 12 21 12 21z" />
+              </svg>
+              <span style={{ fontSize: 14 }}>{heartCount}</span>
+            </button>
+
+            {/* Bookmark */}
+            <button
+              type="button"
+              onClick={toggleSave}
+              disabled={!currentUserId || busySave}
+              aria-pressed={didSave}
+              aria-label={didSave ? 'Remove bookmark' : 'Add bookmark'}
+              title={didSave ? 'Remove bookmark' : 'Add bookmark'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 10px',
+                borderRadius: 8,
+                border: '1px solid #eee',
+                background: '#fff',
+                color: didSave ? '#2563eb' : '#374151',
+                opacity: !currentUserId || busySave ? 0.6 : 1,
+                cursor: !currentUserId || busySave ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {/* Bookmark icon 24px, outline when not saved; filled when saved */}
+              {didSave ? (
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  style={{ display: 'block' }}
+                  fill="currentColor"
+                >
+                  <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
+                </svg>
+              ) : (
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  style={{ display: 'block' }}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
+                </svg>
+              )}
+              {/* Owner-only count next to bookmark icon; no Save/Saved text */}
+              {isOwner ? (
+                <span style={{ fontSize: 14 }}>{bookmarkCount}</span>
+              ) : null}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
