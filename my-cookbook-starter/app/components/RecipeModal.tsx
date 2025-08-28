@@ -237,29 +237,61 @@ export default function RecipeModal({
           width: 'min(800px, 94vw)',
           background: '#fff',
           borderRadius: 12,
-          padding: 16,
+          padding: 0,                // we’ll pad inner sections instead
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: '90vh',
+          overflow: 'hidden',        // content scrolls; header/footer fixed
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div
           style={{
+            padding: '12px 16px',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
+            borderBottom: '1px solid #eee',
           }}
         >
           <div>
             <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
             <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
           </div>
-          <button onClick={onClose} aria-label="Close">
-            ✕
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            title="Close"
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              color: '#111827', // black-ish
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              lineHeight: 0,
+            }}
+          >
+            {/* 24px X icon */}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
           </button>
         </div>
 
-        {/* Body */}
-        <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+        {/* Scrollable Content */}
+        <div style={{ padding: 16, overflowY: 'auto', flex: '1 1 auto' }}>
           <section>
             <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
             {loading ? (
@@ -311,16 +343,20 @@ export default function RecipeModal({
           ) : null}
         </div>
 
-        {/* Footer */}
+        {/* Fixed Footer (inside panel) */}
         <div
           style={{
-            marginTop: 12,
+            padding: '10px 16px',
+            borderTop: '1px solid #eee',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            flex: '0 0 auto',
+            background: '#fff',
           }}
         >
           <div style={{ fontSize: 12, color: '#6b7280' }}>{addedText ?? ''}</div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             {/* Heart */}
             <button
@@ -335,9 +371,12 @@ export default function RecipeModal({
                 opacity: !currentUserId || busyHeart ? 0.6 : 1,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
+                gap: 6,
               }}
+              aria-label={didHeart ? 'Remove heart' : 'Add heart'}
+              title={didHeart ? 'Unheart' : 'Heart'}
             >
+              {/* Better heart icon (fills nicely) */}
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -347,7 +386,7 @@ export default function RecipeModal({
                 stroke="currentColor"
                 strokeWidth="2"
               >
-                <path d="M12 21c-4.8-3.7-8-6.4-8-10a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 3.6-3.2 6.3-8 10z" />
+                <path d="M12.1 21.35c-.07.05-.15.05-.22 0C7.14 17.86 4 15.17 2.28 12.64 1.04 10.83 1.3 8.3 3 6.86a5.01 5.01 0 0 1 6.4.37l.6.6.6-.6a5.01 5.01 0 0 1 6.4-.37c1.7 1.44 1.96 3.97.72 5.78-1.72 2.53-4.86 5.22-9.22 8.71z" />
               </svg>
               <span style={{ fontSize: 14 }}>{heartCount}</span>
             </button>
@@ -365,10 +404,13 @@ export default function RecipeModal({
                 opacity: !currentUserId || busySave ? 0.6 : 1,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
+                gap: 6,
               }}
+              aria-label={didSave ? 'Remove bookmark' : 'Add bookmark'}
+              title={didSave ? 'Remove bookmark' : 'Add bookmark'}
             >
               {didSave ? (
+                // filled
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   width="24"
@@ -379,6 +421,7 @@ export default function RecipeModal({
                   <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
                 </svg>
               ) : (
+                // outline
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   width="24"
