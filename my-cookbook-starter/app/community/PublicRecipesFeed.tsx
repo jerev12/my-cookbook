@@ -2,23 +2,22 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeModal from '../components/RecipeModal';
+import RecipeModal from '@/components/RecipeModal';
 
 type Recipe = {
   id: string;
+  user_id: string;           // ← added
   title: string;
   cuisine: string | null;
   photo_url: string | null;
   source_url: string | null;
+  created_at: string | null; // ← added
 };
 
 export default function PublicRecipesFeed() {
-  // list state
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // modal state (shared RecipeModal)
   const [selected, setSelected] = useState<Recipe | null>(null);
 
   useEffect(() => {
@@ -28,7 +27,7 @@ export default function PublicRecipesFeed() {
 
       const { data, error } = await supabase
         .from('recipes')
-        .select('id, title, cuisine, photo_url, source_url')
+        .select('id, user_id, title, cuisine, photo_url, source_url, created_at') // ← added fields
         .eq('visibility', 'public')
         .order('created_at', { ascending: false });
 
@@ -43,17 +42,12 @@ export default function PublicRecipesFeed() {
     })();
   }, []);
 
-  function openRecipe(r: Recipe) {
-    setSelected(r); // RecipeModal will load steps/ingredients internally
-  }
-
   return (
     <main style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
       <h1 style={{ margin: 0, fontSize: 22, marginBottom: 12 }}>
         Community — Public Recipes
       </h1>
 
-      {/* LIST */}
       {loading ? (
         <div>Loading public recipes…</div>
       ) : errorMsg ? (
@@ -86,7 +80,7 @@ export default function PublicRecipesFeed() {
             <li key={r.id} style={{ borderTop: '1px solid #eee' }}>
               <button
                 type="button"
-                onClick={() => openRecipe(r)}
+                onClick={() => setSelected(r)}
                 style={{
                   width: '100%',
                   textAlign: 'left',
@@ -107,7 +101,6 @@ export default function PublicRecipesFeed() {
         </ul>
       )}
 
-      {/* Shared Recipe Modal (closes on backdrop, X, or onClose) */}
       <RecipeModal
         open={!!selected}
         onClose={() => setSelected(null)}
