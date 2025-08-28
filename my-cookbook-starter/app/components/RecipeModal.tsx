@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Modal from '@/components/Modal';
+import Modal from '../components/Modal';
 import { supabase } from '@/lib/supabaseClient';
 
 type Recipe = {
