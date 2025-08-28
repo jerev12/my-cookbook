@@ -22,9 +22,11 @@ type Ingredient = {
 };
 
 function isSameLocalDate(a: Date, b: Date) {
-  return a.getFullYear() === b.getFullYear()
-    && a.getMonth() === b.getMonth()
-    && a.getDate() === b.getDate();
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
 }
 function formatMonthDayYearWithComma(d: Date) {
   const month = d.toLocaleString(undefined, { month: 'long' });
@@ -149,7 +151,9 @@ export default function RecipeModal({
 
       setLoading(false);
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [open, recipe]);
 
   async function toggleHeart() {
@@ -157,7 +161,7 @@ export default function RecipeModal({
     setBusyHeart(true);
     const next = !didHeart;
     setDidHeart(next);
-    setHeartCount(c => Math.max(0, c + (next ? 1 : -1)));
+    setHeartCount((c) => Math.max(0, c + (next ? 1 : -1)));
     try {
       if (next) {
         const { error } = await supabase.from('recipe_hearts').insert({
@@ -175,7 +179,7 @@ export default function RecipeModal({
       }
     } catch {
       setDidHeart(!next);
-      setHeartCount(c => Math.max(0, c + (next ? -1 : 1)));
+      setHeartCount((c) => Math.max(0, c + (next ? -1 : 1)));
     } finally {
       setBusyHeart(false);
     }
@@ -186,7 +190,7 @@ export default function RecipeModal({
     setBusySave(true);
     const next = !didSave;
     setDidSave(next);
-    if (isOwner) setBookmarkCount(c => Math.max(0, c + (next ? 1 : -1)));
+    if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? 1 : -1)));
     try {
       if (next) {
         const { error } = await supabase.from('recipe_bookmarks').insert({
@@ -204,7 +208,7 @@ export default function RecipeModal({
       }
     } catch {
       setDidSave(!next);
-      if (isOwner) setBookmarkCount(c => Math.max(0, c + (next ? -1 : 1)));
+      if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? -1 : 1)));
     } finally {
       setBusySave(false);
     }
@@ -237,7 +241,7 @@ export default function RecipeModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header: title + cuisine + close */}
+        {/* Header */}
         <div
           style={{
             display: 'flex',
@@ -254,7 +258,7 @@ export default function RecipeModal({
           </button>
         </div>
 
-        {/* Body — Ingredients + Instructions */}
+        {/* Body */}
         <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
           <section>
             <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
@@ -265,9 +269,7 @@ export default function RecipeModal({
                 {ings.length ? (
                   ings.map((i, idx) => {
                     const qty = i.quantity ?? '';
-                    const parts = [qty, i.unit, i.item_name]
-                      .filter(Boolean)
-                      .join(' ');
+                    const parts = [qty, i.unit, i.item_name].filter(Boolean).join(' ');
                     return (
                       <li key={idx}>
                         {parts}
@@ -309,100 +311,79 @@ export default function RecipeModal({
           ) : null}
         </div>
 
-        {/* Footer row — Added on (left) + Actions (right) */}
+        {/* Footer */}
         <div
           style={{
             marginTop: 12,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: 12,
           }}
         >
-          {/* Added on text (left) */}
-          <div style={{ fontSize: 12, color: '#6b7280' }}>
-            {addedText ?? ''}
-          </div>
-
-          {/* Actions (right) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 12, color: '#6b7280' }}>{addedText ?? ''}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             {/* Heart */}
             <button
-              type="button"
               onClick={toggleHeart}
               disabled={!currentUserId || busyHeart}
-              aria-pressed={didHeart}
-              aria-label={didHeart ? 'Remove heart' : 'Add heart'}
-              title={didHeart ? 'Unheart' : 'Heart'}
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 10px',
-                borderRadius: 8,
-                border: '1px solid #eee',
-                background: '#fff',
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: !currentUserId || busyHeart ? 'not-allowed' : 'pointer',
                 color: didHeart ? '#dc2626' : '#374151',
                 opacity: !currentUserId || busyHeart ? 0.6 : 1,
-                cursor: !currentUserId || busyHeart ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
               }}
             >
-              {/* Heart icon 24px, filled when didHeart */}
               <svg
+                xmlns="http://www.w3.org/2000/svg"
                 width="24"
                 height="24"
                 viewBox="0 0 24 24"
-                aria-hidden="true"
-                style={{ display: 'block' }}
                 fill={didHeart ? 'currentColor' : 'none'}
                 stroke="currentColor"
                 strokeWidth="2"
               >
-                <path d="M12 21s-7-4.534-9.5-7.5C.5 11.5 2 7 6 7c2.1 0 3.5 1.1 4 2 0.5-.9 1.9-2 4-2 4 0 5.5 4.5 3.5 6.5C19 16.466 12 21 12 21z" />
+                <path d="M12 21c-4.8-3.7-8-6.4-8-10a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 3.6-3.2 6.3-8 10z" />
               </svg>
               <span style={{ fontSize: 14 }}>{heartCount}</span>
             </button>
 
             {/* Bookmark */}
             <button
-              type="button"
               onClick={toggleSave}
               disabled={!currentUserId || busySave}
-              aria-pressed={didSave}
-              aria-label={didSave ? 'Remove bookmark' : 'Add bookmark'}
-              title={didSave ? 'Remove bookmark' : 'Add bookmark'}
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '6px 10px',
-                borderRadius: 8,
-                border: '1px solid #eee',
-                background: '#fff',
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: !currentUserId || busySave ? 'not-allowed' : 'pointer',
                 color: didSave ? '#2563eb' : '#374151',
                 opacity: !currentUserId || busySave ? 0.6 : 1,
-                cursor: !currentUserId || busySave ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
               }}
             >
-              {/* Bookmark icon 24px, outline when not saved; filled when saved */}
               {didSave ? (
                 <svg
+                  xmlns="http://www.w3.org/2000/svg"
                   width="24"
                   height="24"
                   viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  style={{ display: 'block' }}
                   fill="currentColor"
                 >
                   <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
                 </svg>
               ) : (
                 <svg
+                  xmlns="http://www.w3.org/2000/svg"
                   width="24"
                   height="24"
                   viewBox="0 0 24 24"
-                  aria-hidden="true"
-                  style={{ display: 'block' }}
                   fill="none"
                   stroke="currentColor"
                   strokeWidth="2"
@@ -410,10 +391,7 @@ export default function RecipeModal({
                   <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
                 </svg>
               )}
-              {/* Owner-only count next to bookmark icon; no Save/Saved text */}
-              {isOwner ? (
-                <span style={{ fontSize: 14 }}>{bookmarkCount}</span>
-              ) : null}
+              {isOwner ? <span style={{ fontSize: 14 }}>{bookmarkCount}</span> : null}
             </button>
           </div>
         </div>
