@@ -51,31 +51,23 @@ export default function RecipeModal({
   onClose: () => void;
   recipe: Recipe | null;
 }) {
-  // detail data
   const [steps, setSteps] = useState<Step[]>([]);
   const [ings, setIngs] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(false);
-
-  // author
   const [author, setAuthor] = useState<Profile | null>(null);
-
-  // viewer & ownership
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const isOwner = useMemo(
     () => !!(currentUserId && recipe?.user_id && currentUserId === recipe.user_id),
     [currentUserId, recipe?.user_id]
   );
 
-  // hearts / bookmarks
   const [heartCount, setHeartCount] = useState<number>(0);
   const [didHeart, setDidHeart] = useState<boolean>(false);
   const [busyHeart, setBusyHeart] = useState<boolean>(false);
-
   const [didSave, setDidSave] = useState<boolean>(false);
   const [busySave, setBusySave] = useState<boolean>(false);
-  const [bookmarkCount, setBookmarkCount] = useState<number>(0); // owner only display
+  const [bookmarkCount, setBookmarkCount] = useState<number>(0);
 
-  // added on text
   const addedText = useMemo(() => {
     if (!recipe?.created_at) return null;
     const created = new Date(recipe.created_at);
@@ -85,21 +77,17 @@ export default function RecipeModal({
       : `Added on ${formatMonthDayYearWithComma(created)}`;
   }, [recipe?.created_at]);
 
-  // Load details and meta when modal opens
   useEffect(() => {
     let mounted = true;
     (async () => {
       if (!open || !recipe) return;
 
       setLoading(true);
-
-      // viewer
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id ?? null;
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // author profile
       const { data: profs } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url')
@@ -108,7 +96,6 @@ export default function RecipeModal({
       if (!mounted) return;
       setAuthor((profs?.[0] as Profile) ?? null);
 
-      // ingredients & steps
       const [{ data: stepData }, { data: ingData }] = await Promise.all([
         supabase
           .from('recipe_steps')
@@ -124,7 +111,6 @@ export default function RecipeModal({
       setSteps((stepData as Step[]) || []);
       setIngs((ingData as Ingredient[]) || []);
 
-      // heart count
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
@@ -132,7 +118,6 @@ export default function RecipeModal({
       if (!mounted) return;
       setHeartCount((heartRows ?? []).length);
 
-      // your heart/save + owner bookmark count
       if (uid) {
         const [{ data: myHeart }, { data: mySave }] = await Promise.all([
           supabase
@@ -234,10 +219,7 @@ export default function RecipeModal({
   }
 
   if (!open || !recipe) return null;
-
-  // helper: display name
-  const authorName =
-    author?.display_name || author?.nickname || 'Unknown user';
+  const authorName = author?.display_name || author?.nickname || 'Unknown user';
 
   return (
     <div
@@ -268,32 +250,38 @@ export default function RecipeModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header (author + title / cuisine + X) */}
+        {/* Header */}
         <div
           style={{
             padding: '12px 16px',
             borderBottom: '1px solid #eee',
           }}
         >
-          {/* Author row */}
-          {author && (
+          {/* Author row with X */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 8,
+            }}
+          >
             <a
-              href={`/profile/${author.id}`} // ← adjust if your user route differs
+              href={`/profile/${author?.id ?? ''}`}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 8,
+                gap: 10,
                 textDecoration: 'none',
-                marginBottom: 8,
               }}
             >
-              {author.avatar_url ? (
+              {author?.avatar_url ? (
                 <img
                   src={author.avatar_url}
                   alt={authorName}
                   style={{
-                    width: 32,
-                    height: 32,
+                    width: 40,
+                    height: 40,
                     borderRadius: '50%',
                     objectFit: 'cover',
                   }}
@@ -301,33 +289,18 @@ export default function RecipeModal({
               ) : (
                 <div
                   style={{
-                    width: 32,
-                    height: 32,
+                    width: 40,
+                    height: 40,
                     borderRadius: '50%',
                     background: '#e5e7eb',
                   }}
                   aria-hidden="true"
                 />
               )}
-              <span style={{ color: '#111827', fontWeight: 600, fontSize: 14 }}>
+              <span style={{ color: '#111827', fontWeight: 600, fontSize: 15 }}>
                 {authorName}
               </span>
             </a>
-          )}
-
-          {/* Title row with X on right */}
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: 12,
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
-              <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
-            </div>
             <button
               onClick={onClose}
               aria-label="Close"
@@ -344,7 +317,6 @@ export default function RecipeModal({
                 lineHeight: 0,
               }}
             >
-              {/* 24px X icon */}
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -357,6 +329,12 @@ export default function RecipeModal({
                 <path d="M18 6 6 18M6 6l12 12" />
               </svg>
             </button>
+          </div>
+
+          {/* Title + cuisine */}
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
+            <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
           </div>
         </div>
 
@@ -413,7 +391,7 @@ export default function RecipeModal({
           ) : null}
         </div>
 
-        {/* Fixed Footer (inside panel) */}
+        {/* Fixed Footer */}
         <div
           style={{
             padding: '10px 16px',
@@ -428,7 +406,7 @@ export default function RecipeModal({
           <div style={{ fontSize: 12, color: '#6b7280' }}>{addedText ?? ''}</div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {/* Heart — reverted to your earlier look */}
+            {/* Heart */}
             <button
               onClick={toggleHeart}
               disabled={!currentUserId || busyHeart}
@@ -443,10 +421,7 @@ export default function RecipeModal({
                 alignItems: 'center',
                 gap: 6,
               }}
-              aria-label={didHeart ? 'Remove heart' : 'Add heart'}
-              title={didHeart ? 'Unheart' : 'Heart'}
             >
-              {/* The original heart path you had before */}
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -476,11 +451,8 @@ export default function RecipeModal({
                 alignItems: 'center',
                 gap: 6,
               }}
-              aria-label={didSave ? 'Remove bookmark' : 'Add bookmark'}
-              title={didSave ? 'Remove bookmark' : 'Add bookmark'}
             >
               {didSave ? (
-                // filled
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   width="24"
@@ -491,7 +463,6 @@ export default function RecipeModal({
                   <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
                 </svg>
               ) : (
-                // outline
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   width="24"
