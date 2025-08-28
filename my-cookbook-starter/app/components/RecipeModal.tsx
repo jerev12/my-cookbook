@@ -51,23 +51,31 @@ export default function RecipeModal({
   onClose: () => void;
   recipe: Recipe | null;
 }) {
+  // detail data
   const [steps, setSteps] = useState<Step[]>([]);
   const [ings, setIngs] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // author
   const [author, setAuthor] = useState<Profile | null>(null);
+
+  // viewer & ownership
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const isOwner = useMemo(
     () => !!(currentUserId && recipe?.user_id && currentUserId === recipe.user_id),
     [currentUserId, recipe?.user_id]
   );
 
+  // hearts / bookmarks
   const [heartCount, setHeartCount] = useState<number>(0);
   const [didHeart, setDidHeart] = useState<boolean>(false);
   const [busyHeart, setBusyHeart] = useState<boolean>(false);
+
   const [didSave, setDidSave] = useState<boolean>(false);
   const [busySave, setBusySave] = useState<boolean>(false);
-  const [bookmarkCount, setBookmarkCount] = useState<number>(0);
+  const [bookmarkCount, setBookmarkCount] = useState<number>(0); // owner only display
 
+  // added on text
   const addedText = useMemo(() => {
     if (!recipe?.created_at) return null;
     const created = new Date(recipe.created_at);
@@ -77,17 +85,21 @@ export default function RecipeModal({
       : `Added on ${formatMonthDayYearWithComma(created)}`;
   }, [recipe?.created_at]);
 
+  // Load details and meta when modal opens
   useEffect(() => {
     let mounted = true;
     (async () => {
       if (!open || !recipe) return;
 
       setLoading(true);
+
+      // viewer
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id ?? null;
       if (!mounted) return;
       setCurrentUserId(uid);
 
+      // author profile
       const { data: profs } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url')
@@ -96,6 +108,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setAuthor((profs?.[0] as Profile) ?? null);
 
+      // ingredients & steps
       const [{ data: stepData }, { data: ingData }] = await Promise.all([
         supabase
           .from('recipe_steps')
@@ -111,6 +124,7 @@ export default function RecipeModal({
       setSteps((stepData as Step[]) || []);
       setIngs((ingData as Ingredient[]) || []);
 
+      // heart count
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
@@ -118,6 +132,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setHeartCount((heartRows ?? []).length);
 
+      // your heart/save + owner bookmark count
       if (uid) {
         const [{ data: myHeart }, { data: mySave }] = await Promise.all([
           supabase
@@ -246,33 +261,31 @@ export default function RecipeModal({
           display: 'flex',
           flexDirection: 'column',
           maxHeight: '90vh',
-          overflow: 'hidden',
+          overflow: 'hidden', // content scrolls; header/footer fixed
         }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div
-          style={{
-            padding: '12px 16px',
-            borderBottom: '1px solid #eee',
-          }}
-        >
-          {/* Author row with X */}
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
+          {/* Author row with Edit (owner) + X */}
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
               marginBottom: 8,
+              gap: 12,
             }}
           >
             <a
-              href={`/profile/${author?.id ?? ''}`}
+              href={`/profile/${author?.id ?? ''}`} // adjust if your route differs
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 10,
                 textDecoration: 'none',
+                flex: '1 1 auto',
+                minWidth: 0,
               }}
             >
               {author?.avatar_url ? (
@@ -301,6 +314,37 @@ export default function RecipeModal({
                 {authorName}
               </span>
             </a>
+
+            {/* Edit (owner only) */}
+            {isOwner && (
+              <a
+                href={`/add-recipe?id=${recipe.id}`}
+                title="Edit recipe"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  color: '#111827',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  lineHeight: 0,
+                  textDecoration: 'none',
+                }}
+              >
+                {/* pencil icon 24px */}
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24" height="24" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" strokeWidth="2"
+                >
+                  <path d="M3 21l3.8-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L3 21z" />
+                  <path d="M15 6l3 3" />
+                </svg>
+              </a>
+            )}
+
             <button
               onClick={onClose}
               aria-label="Close"
@@ -317,6 +361,7 @@ export default function RecipeModal({
                 lineHeight: 0,
               }}
             >
+              {/* 24px X icon */}
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -406,7 +451,7 @@ export default function RecipeModal({
           <div style={{ fontSize: 12, color: '#6b7280' }}>{addedText ?? ''}</div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {/* Heart */}
+            {/* Heart (outline when not liked, filled when liked) */}
             <button
               onClick={toggleHeart}
               disabled={!currentUserId || busyHeart}
@@ -421,6 +466,8 @@ export default function RecipeModal({
                 alignItems: 'center',
                 gap: 6,
               }}
+              aria-label={didHeart ? 'Remove heart' : 'Add heart'}
+              title={didHeart ? 'Unheart' : 'Heart'}
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -436,7 +483,7 @@ export default function RecipeModal({
               <span style={{ fontSize: 14 }}>{heartCount}</span>
             </button>
 
-            {/* Bookmark */}
+            {/* Bookmark (outline/filled) */}
             <button
               onClick={toggleSave}
               disabled={!currentUserId || busySave}
@@ -451,6 +498,8 @@ export default function RecipeModal({
                 alignItems: 'center',
                 gap: 6,
               }}
+              aria-label={didSave ? 'Remove bookmark' : 'Add bookmark'}
+              title={didSave ? 'Remove bookmark' : 'Add bookmark'}
             >
               {didSave ? (
                 <svg
