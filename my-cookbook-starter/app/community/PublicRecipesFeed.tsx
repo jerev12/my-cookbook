@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeModal from '@/components/RecipeModal';
+import RecipeModal from '../components/RecipeModal';
 
 type Recipe = {
   id: string;
