@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '../components/RecipeModal';
-import RecipeBadges from '../components/RecipeBadges';
+import { RecipeTile, recipeGridStyle } from '../components/RecipeBadges';
 
 type Recipe = {
   id: string;
   user_id: string;
   title: string;
-  cuisine: string | null;           // still in DB, but not displayed
-  recipe_types: string[] | null;    // <-- NEW: displayed as badges
+  cuisine: string | null;           // still in DB, not displayed
+  recipe_types: string[] | null;    // displayed on overlay
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
@@ -85,47 +85,15 @@ export default function PublicRecipesFeed() {
           No public recipes yet.
         </div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
-            gap: 12,
-          }}
-        >
+        <div style={recipeGridStyle}>
           {rows.map((r) => (
-            <button
+            <RecipeTile
               key={r.id}
+              title={r.title}
+              types={r.recipe_types ?? []}
+              photoUrl={r.photo_url}
               onClick={() => openRecipe(r)}
-              style={{
-                border: '1px solid #eee',
-                borderRadius: 12,
-                padding: 10,
-                background: '#fff',
-                textAlign: 'left',
-                cursor: 'pointer',
-              }}
-              aria-label={`Open ${r.title}`}
-            >
-              {r.photo_url ? (
-                <img
-                  src={r.photo_url}
-                  alt={r.title}
-                  style={{
-                    width: '100%',
-                    aspectRatio: '4/3',
-                    objectFit: 'cover',
-                    borderRadius: 8,
-                  }}
-                />
-              ) : null}
-              <div style={{ fontWeight: 600, marginTop: 6, fontSize: 14 }}>
-                {r.title}
-              </div>
-              {/* Recipe Type badges (no cuisine fallback) */}
-              <div style={{ marginTop: 4 }}>
-                <RecipeBadges types={r.recipe_types ?? []} />
-              </div>
-            </button>
+            />
           ))}
         </div>
       )}
