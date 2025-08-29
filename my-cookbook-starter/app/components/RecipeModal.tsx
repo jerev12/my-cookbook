@@ -42,6 +42,10 @@ function formatMonthDayYearWithComma(d: Date) {
   return `${month}, ${day}, ${year}`;
 }
 
+// Footer height used to keep last content above the fixed footer.
+// Tweak if you adjust footer size later.
+const FOOTER_HEIGHT_PX = 56;
+
 export default function RecipeModal({
   open,
   onClose,
@@ -84,6 +88,16 @@ export default function RecipeModal({
       ? 'Added today'
       : `Added on ${formatMonthDayYearWithComma(created)}`;
   }, [recipe?.created_at]);
+
+  // Lock body scroll while modal is open
+  useEffect(() => {
+    if (!open) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open]);
 
   // Load details and meta when modal opens
   useEffect(() => {
@@ -246,7 +260,7 @@ export default function RecipeModal({
         alignItems: 'center',
         justifyContent: 'center',
         padding: 12,
-        zIndex: 50,
+        zIndex: 1000, // <-- above bottom tabs
       }}
       onClick={onClose}
       aria-modal="true"
@@ -383,8 +397,17 @@ export default function RecipeModal({
           </div>
         </div>
 
-        {/* Scrollable Content */}
-        <div style={{ padding: 16, overflowY: 'auto', flex: '1 1 auto' }}>
+        {/* Scrollable Content (safe-area & footer-aware padding) */}
+        <div
+          style={{
+            padding: 16,
+            overflowY: 'auto',
+            flex: '1 1 auto',
+            // Keep last lines above the fixed footer + safe area
+            paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + 16px + env(safe-area-inset-bottom))`,
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
           <section>
             <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
             {loading ? (
@@ -436,16 +459,19 @@ export default function RecipeModal({
           ) : null}
         </div>
 
-        {/* Fixed Footer */}
+        {/* Fixed Footer (inside panel) */}
         <div
           style={{
             padding: '10px 16px',
+            // add safe area to footer padding so actions are tappable above the home indicator
+            paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
             borderTop: '1px solid #eee',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             flex: '0 0 auto',
             background: '#fff',
+            minHeight: FOOTER_HEIGHT_PX, // keep height predictable
           }}
         >
           <div style={{ fontSize: 12, color: '#6b7280' }}>{addedText ?? ''}</div>
