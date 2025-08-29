@@ -42,7 +42,8 @@ function formatMonthDayYearWithComma(d: Date) {
   return `${month}, ${day}, ${year}`;
 }
 
-const FOOTER_HEIGHT_PX = 56;
+// smaller footer height
+const FOOTER_HEIGHT_PX = 44;
 
 export default function RecipeModal({
   open,
@@ -374,7 +375,7 @@ export default function RecipeModal({
           </div>
         </div>
 
-        {/* SCROLLABLE: image edge-to-edge, then padded content */}
+        {/* SCROLLABLE: image + body */}
         <div
           style={{
             overflowY: 'auto',
@@ -382,7 +383,6 @@ export default function RecipeModal({
             WebkitOverflowScrolling: 'touch',
           }}
         >
-          {/* Full-width image (no padding) */}
           {recipe.photo_url ? (
             <img
               src={recipe.photo_url}
@@ -391,16 +391,13 @@ export default function RecipeModal({
                 width: '100%',
                 height: 'auto',
                 display: 'block',
-                border: 0,
               }}
             />
           ) : null}
 
-          {/* Padded wrapper for the rest of the content */}
           <div
             style={{
               padding: 16,
-              // keep last content above the fixed footer + safe area
               paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + env(safe-area-inset-bottom))`,
             }}
           >
