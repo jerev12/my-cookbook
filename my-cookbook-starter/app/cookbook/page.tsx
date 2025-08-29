@@ -203,7 +203,7 @@ export default function CookbookPage() {
             <div
               style={{
                 background: '#fff',
-                border: '1px solid '#eee',
+                border: '1px solid #eee',  // <-- fixed
                 borderRadius: 12,
                 padding: 16,
                 color: '#606375',
