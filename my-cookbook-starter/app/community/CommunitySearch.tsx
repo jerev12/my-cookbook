@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
+import RecipeBadges from '@/components/RecipeBadges';
 
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
 
@@ -20,7 +21,8 @@ type RecipeRow = {
   id: string;
   user_id: string;
   title: string;
-  cuisine: string | null;
+  cuisine: string | null;              // still allowed in search text; not displayed
+  recipe_types?: string[] | null;      // <-- NEW: what we display
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
@@ -126,7 +128,10 @@ export default function CommunitySearch() {
         if (error) throw error;
 
         let rows = (data as RecipeRow[]) ?? [];
-        rows = await backfillPhotos(rows); // add photo_url values
+
+        // Backfill both photo_url and recipe_types from the recipes table
+        rows = await backfillRecipeMeta(rows);
+
         setRecipes(rows);
         setHasMore(rows.length === PAGE_SIZE);
         setUsers([]);
@@ -140,26 +145,34 @@ export default function CommunitySearch() {
     }
   }
 
-  async function backfillPhotos(rows: RecipeRow[]): Promise<RecipeRow[]> {
+  // Backfill both photo_url and recipe_types for rows returned by the RPC
+  async function backfillRecipeMeta(rows: RecipeRow[]): Promise<RecipeRow[]> {
     if (!rows.length) return rows;
     const ids = rows.map(r => r.id);
 
     const { data, error } = await supabase
       .from('recipes')
-      .select('id, photo_url')
+      .select('id, photo_url, recipe_types')
       .in('id', ids);
 
     if (error || !data) return rows;
 
-    const photoMap = new Map<string, string | null>();
-    data.forEach((r: { id: string; photo_url: string | null }) => {
-      photoMap.set(r.id, r.photo_url ?? null);
+    const metaMap = new Map<
+      string,
+      { photo_url: string | null; recipe_types: string[] | null }
+    >();
+    data.forEach((r: { id: string; photo_url: string | null; recipe_types: string[] | null }) => {
+      metaMap.set(r.id, { photo_url: r.photo_url ?? null, recipe_types: r.recipe_types ?? null });
     });
 
-    return rows.map(r => ({
-      ...r,
-      photo_url: r.photo_url ?? photoMap.get(r.id) ?? null,
-    }));
+    return rows.map(r => {
+      const m = metaMap.get(r.id);
+      return {
+        ...r,
+        photo_url: r.photo_url ?? m?.photo_url ?? null,
+        recipe_types: r.recipe_types ?? m?.recipe_types ?? null,
+      };
+    });
   }
 
   async function openRecipe(rid: string) {
@@ -169,7 +182,7 @@ export default function CommunitySearch() {
 
       const { data, error } = await supabase
         .from('recipes')
-        .select('id,user_id,title,cuisine,photo_url,source_url,created_at')
+        .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at')
         .eq('id', rid)
         .single();
 
@@ -298,7 +311,8 @@ export default function CommunitySearch() {
       background: '#f3f4f6',
     } as CSSProperties,
     rTitle: { fontWeight: 600, marginTop: 6, fontSize: 14 } as CSSProperties,
-    rCuisine: { color: '#666', fontSize: 12 } as CSSProperties,
+    // Removed rCuisine visual (we render badges instead)
+    rTypesWrap: { marginTop: 4 } as CSSProperties,
 
     userRow: {
       display: 'flex',
@@ -480,7 +494,9 @@ export default function CommunitySearch() {
                       <div style={S.placeholder} />
                     )}
                     <div style={S.rTitle}>{r.title}</div>
-                    <div style={S.rCuisine}>{r.cuisine || '—'}</div>
+                    <div style={S.rTypesWrap}>
+                      <RecipeBadges types={r.recipe_types} />
+                    </div>
                   </button>
                 ))
               )}
