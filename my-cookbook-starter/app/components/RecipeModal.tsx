@@ -488,31 +488,34 @@ export default function RecipeModal({
               {loading ? (
                 <div>Loading…</div>
               ) : (
-                sections.map((sec) => (
-                  <div key={`ing-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
-                    <div style={{ fontWeight: 600 }}>{sec.name}</div>
-                    {sec.ingredients.length > 0 ? (
-                      <ul style={{ paddingLeft: 18, margin: 0 }}>
-                        {sec.ingredients.map((i, idx) => {
-                          const qty = i.quantity ?? '';
-                          const parts = [qty, i.unit, i.item_name]
-                            .filter(Boolean)
-                            .join(' ');
-                          return (
-                            <li key={idx}>
-                              {parts}
-                              {i.note ? ` (${i.note})` : ''}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    ) : (
-                      <div style={{ color: '#6b7280', fontSize: 13 }}>
-                        No ingredients.
-                      </div>
-                    )}
-                  </div>
-                ))
+                sections.map((sec) => {
+                  const hideLabel = sections.length === 1 && sec.name === 'Main';
+                  return (
+                    <div key={`ing-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
+                      {!hideLabel && <div style={{ fontWeight: 600 }}>{sec.name}</div>}
+                      {sec.ingredients.length > 0 ? (
+                        <ul style={{ paddingLeft: 18, margin: 0 }}>
+                          {sec.ingredients.map((i, idx) => {
+                            const qty = i.quantity ?? '';
+                            const parts = [qty, i.unit, i.item_name]
+                              .filter(Boolean)
+                              .join(' ');
+                            return (
+                              <li key={idx}>
+                                {parts}
+                                {i.note ? ` (${i.note})` : ''}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <div style={{ color: '#6b7280', fontSize: 13 }}>
+                          No ingredients.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
 
@@ -522,22 +525,25 @@ export default function RecipeModal({
               {loading ? (
                 <div>Loading…</div>
               ) : (
-                sections.map((sec) => (
-                  <div key={`steps-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
-                    <div style={{ fontWeight: 600 }}>{sec.name}</div>
-                    {sec.steps.length > 0 ? (
-                      <ol style={{ paddingLeft: 20, margin: 0 }}>
-                        {sec.steps.map((s, idx) => (
-                          <li key={idx}>{s.body}</li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <div style={{ color: '#6b7280', fontSize: 13 }}>
-                        No instructions.
-                      </div>
-                    )}
-                  </div>
-                ))
+                sections.map((sec) => {
+                  const hideLabel = sections.length === 1 && sec.name === 'Main';
+                  return (
+                    <div key={`steps-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
+                      {!hideLabel && <div style={{ fontWeight: 600 }}>{sec.name}</div>}
+                      {sec.steps.length > 0 ? (
+                        <ol style={{ paddingLeft: 20, margin: 0 }}>
+                          {sec.steps.map((s, idx) => (
+                            <li key={idx}>{s.body}</li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <div style={{ color: '#6b7280', fontSize: 13 }}>
+                          No instructions.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
 
