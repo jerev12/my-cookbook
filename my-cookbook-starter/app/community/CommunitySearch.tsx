@@ -1,8 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
+
+// 👉 Update this path if your modal is somewhere else:
+const RecipeModal = dynamic(() => import('@/components/RecipeModal'), { ssr: false });
 
 type TabKey = 'recipes' | 'users';
 
@@ -48,6 +52,9 @@ export default function CommunitySearch() {
   // me / friendships
   const [myId, setMyId] = useState<string | null>(null);
   const [friendStatus, setFriendStatus] = useState<Record<string, FriendRelation>>({});
+
+  // recipe modal
+  const [openRecipeId, setOpenRecipeId] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -141,34 +148,31 @@ export default function CommunitySearch() {
   }
 
   // friend actions
-async function handleToggleRequest(targetId: string, relation: FriendRelation) {
-  try {
-    // Optimistically flip the UI first
-    setFriendStatus(prev => ({
-      ...prev,
-      [targetId]: relation === 'none' ? 'pending_outgoing' : 'none',
-    }));
+  async function handleToggleRequest(targetId: string, relation: FriendRelation) {
+    try {
+      // Optimistic UI first
+      setFriendStatus(prev => ({
+        ...prev,
+        [targetId]: relation === 'none' ? 'pending_outgoing' : 'none',
+      }));
 
-    if (relation === 'none') {
-      const { error } = await supabase.rpc('request_friend', { target_id: targetId });
-      if (error) throw error;
-    } else if (relation === 'pending_outgoing') {
-      // Cancel the outgoing request
-      const { error } = await supabase.rpc('unfriend', { target_id: targetId });
-      if (error) throw error;
-    } else {
-      return; // pending_incoming or friends handled elsewhere
+      if (relation === 'none') {
+        const { error } = await supabase.rpc('request_friend', { target_id: targetId });
+        if (error) throw error;
+      } else if (relation === 'pending_outgoing') {
+        const { error } = await supabase.rpc('unfriend', { target_id: targetId }); // cancel
+        if (error) throw error;
+      } else {
+        return;
+      }
+
+      await refreshStatus([targetId]);
+    } catch (e: any) {
+      console.error(e);
+      setFriendStatus(prev => ({ ...prev, [targetId]: relation })); // revert
+      alert(e?.message ?? 'Failed to update friend request.');
     }
-
-    // Confirm with source of truth
-    await refreshStatus([targetId]);
-  } catch (e: any) {
-    console.error(e);
-    // Revert the optimistic change on failure
-    setFriendStatus(prev => ({ ...prev, [targetId]: relation }));
-    alert(e?.message ?? 'Failed to update friend request.');
   }
-}
 
   async function handleUnfriend(targetId: string) {
     try {
@@ -196,9 +200,9 @@ async function handleToggleRequest(targetId: string, relation: FriendRelation) {
   const S = {
     container: {
       width: '100%',
-      maxWidth: 640, // comfy on desktop; adjust if you want wider
+      maxWidth: 640,
       margin: '0 auto',
-      padding: '16px', // side padding so input doesn't touch edges on mobile
+      padding: '16px',
       boxSizing: 'border-box' as const,
     },
     h1: { fontSize: 22, fontWeight: 600, margin: '0 0 12px 0' } as CSSProperties,
@@ -239,28 +243,70 @@ async function handleToggleRequest(targetId: string, relation: FriendRelation) {
       background: '#fff',
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
+
+    // Cookbook-like cards
     cardList: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
       gap: 12,
     } as CSSProperties,
-    card: {
+    // Button-like clickable card (for modal)
+    cardButton: {
       display: 'block',
+      width: '100%',
+      textAlign: 'left' as const,
+      padding: 0,
       border: '1px solid #e5e7eb',
-      borderRadius: 8,
+      borderRadius: 10,
+      background: '#fff',
       overflow: 'hidden',
-      textDecoration: 'none',
-      color: 'inherit',
+      cursor: 'pointer',
     } as CSSProperties,
     image: {
       width: '100%',
-      height: 144,
+      height: 168,
       objectFit: 'cover',
       background: '#f3f4f6',
+      display: 'block',
     } as CSSProperties,
     cardBody: { padding: 12 } as CSSProperties,
-    title: { fontWeight: 600, fontSize: 14 } as CSSProperties,
-    meta: { marginTop: 4, fontSize: 12, color: '#4b5563' } as CSSProperties,
+    title: {
+      fontWeight: 600,
+      fontSize: 15,
+      lineHeight: 1.25,
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    } as CSSProperties,
+    metaRow: {
+      marginTop: 8,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+    } as CSSProperties,
+    chip: {
+      display: 'inline-block',
+      fontSize: 11,
+      lineHeight: 1,
+      padding: '6px 8px',
+      borderRadius: 9999,
+      background: '#f3f4f6',
+      color: '#374151',
+    } as CSSProperties,
+    badge: {
+      display: 'inline-block',
+      fontSize: 10,
+      lineHeight: 1,
+      padding: '5px 8px',
+      borderRadius: 6,
+      background: '#eef2ff',
+      color: '#3730a3',
+      textTransform: 'uppercase' as const,
+      letterSpacing: 0.4,
+    } as CSSProperties,
+
+    // Users list
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -271,14 +317,13 @@ async function handleToggleRequest(targetId: string, relation: FriendRelation) {
       gap: 8,
     } as CSSProperties,
     userLeft: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } as CSSProperties,
-    avatar: { width: 100, height: 100, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
+    avatar: { width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
     name: {
       fontSize: 14,
       whiteSpace: 'nowrap',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
     } as CSSProperties,
-    nickname: { marginLeft: 6, color: '#6b7280', fontSize: 12 } as CSSProperties,
     btn: {
       border: '1px solid #e5e7eb',
       borderRadius: 6,
@@ -296,6 +341,7 @@ async function handleToggleRequest(targetId: string, relation: FriendRelation) {
       opacity: 0.6,
       cursor: 'default',
     } as CSSProperties,
+
     pager: { marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' } as CSSProperties,
     pagerBtn: {
       border: '1px solid #e5e7eb',
@@ -321,6 +367,7 @@ async function handleToggleRequest(targetId: string, relation: FriendRelation) {
           style={S.pill(tab === 'recipes')}
           onClick={() => setTab('recipes')}
         >
+        {/* order chosen for your default */}
           Recipes
         </button>
         <button
@@ -337,7 +384,7 @@ async function handleToggleRequest(targetId: string, relation: FriendRelation) {
       <div style={S.row}>
         <input
           style={S.input}
-          placeholder={tab === 'users' ? 'Search people by name or nickname…' : 'Search recipes by title, cuisine, or instructions…'}
+          placeholder={tab === 'users' ? 'Search people by name…' : 'Search recipes by title, cuisine, or instructions…'}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -378,49 +425,49 @@ async function handleToggleRequest(targetId: string, relation: FriendRelation) {
                   const relation = friendStatus[p.id] ?? 'none';
                   const isMe = myId === p.id;
 
-     let actionEl: JSX.Element = <span style={S.hint}>You</span>;
-if (!isMe) {
-  if (relation === 'none' || relation === 'pending_outgoing') {
-    // Add or cancel outgoing request (toggle)
-    actionEl = (
-      <button
-        style={{
-          ...S.btn,
-          ...(relation === 'pending_outgoing' ? S.btnDark : {}),
-          cursor: 'pointer',
-        }}
-        onClick={() => handleToggleRequest(p.id, relation)}
-        aria-pressed={relation === 'pending_outgoing'}
-        title={relation === 'pending_outgoing' ? 'Tap to cancel request' : 'Add Friend'}
-      >
-        {relation === 'pending_outgoing' ? 'Requested' : 'Add Friend'}
-      </button>
-    );
-  } else if (relation === 'pending_incoming') {
-    // Someone sent YOU a request → read-only here
-    actionEl = (
-      <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
-        Requested
-      </button>
-    );
-  } else {
-    // relation === 'friends' → allow unfriending
-    actionEl = (
-      <button
-        style={{ ...S.btn, cursor: 'pointer' }}
-        onClick={() => handleUnfriend(p.id)}
-        title="Unfriend"
-      >
-        Friend
-      </button>
-    );
-  }
-}
+                  let actionEl: JSX.Element = <span style={S.hint}>You</span>;
+                  if (!isMe) {
+                    if (relation === 'none' || relation === 'pending_outgoing') {
+                      // toggle: add / cancel
+                      actionEl = (
+                        <button
+                          style={{
+                            ...S.btn,
+                            ...(relation === 'pending_outgoing' ? S.btnDark : {}),
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => handleToggleRequest(p.id, relation)}
+                          aria-pressed={relation === 'pending_outgoing'}
+                          title={relation === 'pending_outgoing' ? 'Tap to cancel request' : 'Add Friend'}
+                        >
+                          {relation === 'pending_outgoing' ? 'Requested' : 'Add Friend'}
+                        </button>
+                      );
+                    } else if (relation === 'pending_incoming') {
+                      // read-only here
+                      actionEl = (
+                        <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
+                          Requested
+                        </button>
+                      );
+                    } else {
+                      // friends → unfriend
+                      actionEl = (
+                        <button
+                          style={{ ...S.btn, cursor: 'pointer' }}
+                          onClick={() => handleUnfriend(p.id)}
+                          title="Unfriend"
+                        >
+                          Friend
+                        </button>
+                      );
+                    }
+                  }
 
                   return (
                     <div key={p.id} style={S.userRow}>
                       <Link href={`/profiles/${p.id}`} style={S.userLeft}>
-                        {/* tiny avatar 36x36 */}
+                        {/* avatar */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={p.avatar_url ?? '/avatar-placeholder.png'}
@@ -439,28 +486,40 @@ if (!isMe) {
             </div>
           )}
 
-          {/* Recipes grid */}
+          {/* Recipes grid (Cookbook-like) */}
           {!loading && !errMsg && tab === 'recipes' && (
             <div style={S.cardList}>
               {recipes.length === 0 ? (
                 <div style={S.hint}>No recipes found.</div>
               ) : (
                 recipes.map((r) => (
-                  <Link key={r.id} href={`/recipes/${r.id}`} style={S.card}>
+                  <button
+                    key={r.id}
+                    style={S.cardButton}
+                    onClick={() => setOpenRecipeId(r.id)}
+                    aria-label={`Open ${r.title}`}
+                  >
+                    {/* Photo */}
                     {r.photo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={r.photo_url} alt={r.title} style={S.image} />
                     ) : (
                       <div style={S.image} />
                     )}
+
+                    {/* Body */}
                     <div style={S.cardBody}>
-                      <div style={S.title}>{r.title}</div>
-                      <div style={S.meta}>
-                        {r.cuisine ?? '—'}
-                        {r.visibility !== 'public' ? ` • ${String(r.visibility).toUpperCase()}` : ''}
+                      <div style={S.title} title={r.title}>
+                        {r.title}
+                      </div>
+                      <div style={S.metaRow}>
+                        <span style={S.chip}>{r.cuisine || 'Unknown cuisine'}</span>
+                        {r.visibility !== 'public' && (
+                          <span style={S.badge}>{String(r.visibility).toUpperCase()}</span>
+                        )}
                       </div>
                     </div>
-                  </Link>
+                  </button>
                 ))
               )}
             </div>
@@ -487,6 +546,14 @@ if (!isMe) {
             </div>
           )}
         </>
+      )}
+
+      {/* Recipe Modal */}
+      {openRecipeId && (
+        <RecipeModal
+          recipeId={openRecipeId}
+          onClose={() => setOpenRecipeId(null)}
+        />
       )}
     </div>
   );
