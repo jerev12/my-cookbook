@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeModal from '@/app/components/RecipeModal';
-import RecipeBadges from '@/components/RecipeBadges';
+import RecipeModal from '../app/components/RecipeModal';
+import RecipeBadges from '../components/RecipeBadges';
 
 type Recipe = {
   id: string;
