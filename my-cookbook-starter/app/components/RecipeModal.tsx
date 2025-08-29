@@ -42,8 +42,7 @@ function formatMonthDayYearWithComma(d: Date) {
   return `${month}, ${day}, ${year}`;
 }
 
-// Footer height used to keep last content above the fixed footer.
-// Tweak if you adjust footer size later.
+// Keep in sync with footer visual height
 const FOOTER_HEIGHT_PX = 56;
 
 export default function RecipeModal({
@@ -77,7 +76,7 @@ export default function RecipeModal({
 
   const [didSave, setDidSave] = useState<boolean>(false);
   const [busySave, setBusySave] = useState<boolean>(false);
-  const [bookmarkCount, setBookmarkCount] = useState<number>(0); // owner only display
+  const [bookmarkCount, setBookmarkCount] = useState<number>(0); // owner only
 
   // added on text
   const addedText = useMemo(() => {
@@ -99,7 +98,7 @@ export default function RecipeModal({
     };
   }, [open]);
 
-  // Load details and meta when modal opens
+  // Load details & meta on open
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -113,7 +112,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // author profile
+      // author
       const { data: profs } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url')
@@ -138,7 +137,7 @@ export default function RecipeModal({
       setSteps((stepData as Step[]) || []);
       setIngs((ingData as Ingredient[]) || []);
 
-      // heart count
+      // hearts total
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
@@ -146,8 +145,8 @@ export default function RecipeModal({
       if (!mounted) return;
       setHeartCount((heartRows ?? []).length);
 
-      // your heart/save + owner bookmark count
       if (uid) {
+        // your heart/save
         const [{ data: myHeart }, { data: mySave }] = await Promise.all([
           supabase
             .from('recipe_hearts')
@@ -166,6 +165,7 @@ export default function RecipeModal({
         setDidHeart(!!myHeart?.length);
         setDidSave(!!mySave?.length);
 
+        // owner bookmark count
         if (recipe.user_id === uid) {
           const { data: bmRows } = await supabase
             .from('recipe_bookmarks')
@@ -260,7 +260,7 @@ export default function RecipeModal({
         alignItems: 'center',
         justifyContent: 'center',
         padding: 12,
-        zIndex: 1000, // <-- above bottom tabs
+        zIndex: 1000, // above bottom tabs
       }}
       onClick={onClose}
       aria-modal="true"
@@ -275,24 +275,23 @@ export default function RecipeModal({
           display: 'flex',
           flexDirection: 'column',
           maxHeight: '90vh',
-          overflow: 'hidden', // content scrolls; header/footer fixed
+          overflow: 'hidden', // header/footer fixed, content scrolls
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* Header (author + edit + close) */}
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
-          {/* Author row with Edit (owner) + X */}
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              marginBottom: 8,
+              marginBottom: 0,
               gap: 12,
             }}
           >
             <a
-              href={`/profile/${author?.id ?? ''}`} // adjust if your route differs
+              href={`/profile/${author?.id ?? ''}`}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -329,7 +328,6 @@ export default function RecipeModal({
               </span>
             </a>
 
-            {/* Edit (owner only) */}
             {isOwner && (
               <a
                 href={`/add-recipe?id=${recipe.id}`}
@@ -347,7 +345,6 @@ export default function RecipeModal({
                   textDecoration: 'none',
                 }}
               >
-                {/* pencil icon 24px */}
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   width="24" height="24" viewBox="0 0 24 24"
@@ -375,7 +372,6 @@ export default function RecipeModal({
                 lineHeight: 0,
               }}
             >
-              {/* 24px X icon */}
               <svg
                 xmlns="http://www.w3.org/2000/svg"
                 width="24"
@@ -389,21 +385,34 @@ export default function RecipeModal({
               </svg>
             </button>
           </div>
-
-          {/* Title + cuisine */}
-          <div>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
-            <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
-          </div>
         </div>
 
-        {/* Scrollable Content (safe-area & footer-aware padding) */}
+        {/* Image (full width; preserve the user's exact crop) */}
+        {recipe.photo_url ? (
+          <img
+            src={recipe.photo_url}
+            alt={recipe.title}
+            style={{
+              width: '100%',
+              height: 'auto', // keep original crop/aspect
+              display: 'block',
+              borderBottom: '1px solid #eee',
+            }}
+          />
+        ) : null}
+
+        {/* Title + cuisine (moved below image) */}
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
+          <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
+        </div>
+
+        {/* Scrollable content with safe-area & footer-aware padding */}
         <div
           style={{
             padding: 16,
             overflowY: 'auto',
             flex: '1 1 auto',
-            // Keep last lines above the fixed footer + safe area
             paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + 16px + env(safe-area-inset-bottom))`,
             WebkitOverflowScrolling: 'touch',
           }}
@@ -459,11 +468,10 @@ export default function RecipeModal({
           ) : null}
         </div>
 
-        {/* Fixed Footer (inside panel) */}
+        {/* Fixed footer (safe-area aware) */}
         <div
           style={{
             padding: '10px 16px',
-            // add safe area to footer padding so actions are tappable above the home indicator
             paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
             borderTop: '1px solid #eee',
             display: 'flex',
@@ -471,13 +479,13 @@ export default function RecipeModal({
             justifyContent: 'space-between',
             flex: '0 0 auto',
             background: '#fff',
-            minHeight: FOOTER_HEIGHT_PX, // keep height predictable
+            minHeight: FOOTER_HEIGHT_PX,
           }}
         >
           <div style={{ fontSize: 12, color: '#6b7280' }}>{addedText ?? ''}</div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {/* Heart (outline when not liked, filled when liked) */}
+            {/* Heart */}
             <button
               onClick={toggleHeart}
               disabled={!currentUserId || busyHeart}
@@ -509,7 +517,7 @@ export default function RecipeModal({
               <span style={{ fontSize: 14 }}>{heartCount}</span>
             </button>
 
-            {/* Bookmark (outline/filled) */}
+            {/* Bookmark */}
             <button
               onClick={toggleSave}
               disabled={!currentUserId || busySave}
