@@ -4,7 +4,6 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-import { RecipeTile, recipeGridStyle } from '../components/RecipeBadges';
 
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
 
@@ -21,8 +20,7 @@ type RecipeRow = {
   id: string;
   user_id: string;
   title: string;
-  cuisine: string | null;              // kept for search text, not displayed
-  recipe_types?: string[] | null;      // displayed (no fallback)
+  cuisine: string | null;
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
@@ -128,8 +126,7 @@ export default function CommunitySearch() {
         if (error) throw error;
 
         let rows = (data as RecipeRow[]) ?? [];
-        rows = await backfillRecipeMeta(rows); // ensure photo_url + recipe_types present
-
+        rows = await backfillPhotos(rows); // ensure photo_url is present
         setRecipes(rows);
         setHasMore(rows.length === PAGE_SIZE);
         setUsers([]);
@@ -143,31 +140,26 @@ export default function CommunitySearch() {
     }
   }
 
-  // Backfill both photo_url and recipe_types for rows returned by the RPC
-  async function backfillRecipeMeta(rows: RecipeRow[]): Promise<RecipeRow[]> {
+  async function backfillPhotos(rows: RecipeRow[]): Promise<RecipeRow[]> {
     if (!rows.length) return rows;
     const ids = rows.map(r => r.id);
 
     const { data, error } = await supabase
       .from('recipes')
-      .select('id, photo_url, recipe_types')
+      .select('id, photo_url')
       .in('id', ids);
 
     if (error || !data) return rows;
 
-    const metaMap = new Map<string, { photo_url: string | null; recipe_types: string[] | null }>();
-    data.forEach((r: { id: string; photo_url: string | null; recipe_types: string[] | null }) => {
-      metaMap.set(r.id, { photo_url: r.photo_url ?? null, recipe_types: r.recipe_types ?? null });
+    const photoMap = new Map<string, string | null>();
+    data.forEach((r: { id: string; photo_url: string | null }) => {
+      photoMap.set(r.id, r.photo_url ?? null);
     });
 
-    return rows.map(r => {
-      const m = metaMap.get(r.id);
-      return {
-        ...r,
-        photo_url: r.photo_url ?? m?.photo_url ?? null,
-        recipe_types: r.recipe_types ?? m?.recipe_types ?? null,
-      };
-    });
+    return rows.map(r => ({
+      ...r,
+      photo_url: r.photo_url ?? photoMap.get(r.id) ?? null,
+    }));
   }
 
   async function openRecipe(rid: string) {
@@ -177,7 +169,7 @@ export default function CommunitySearch() {
 
       const { data, error } = await supabase
         .from('recipes')
-        .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at')
+        .select('id,user_id,title,cuisine,photo_url,source_url,created_at')
         .eq('id', rid)
         .single();
 
@@ -276,6 +268,40 @@ export default function CommunitySearch() {
       minWidth: 0,
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
+
+    // Recipe cards (match My Cookbook)
+    cardList: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
+      gap: 12,
+    } as CSSProperties,
+    cardButton: {
+      border: '1px solid #eee',
+      borderRadius: 12,
+      padding: 10,
+      background: '#fff',
+      textAlign: 'left' as const,
+      cursor: 'pointer',
+      width: '100%',
+    } as CSSProperties,
+    image: {
+      width: '100%',
+      aspectRatio: '4 / 3',
+      objectFit: 'cover',
+      borderRadius: 8,
+      display: 'block',
+      background: '#f3f4f6',
+    } as CSSProperties,
+    placeholder: {
+      width: '100%',
+      aspectRatio: '4 / 3',
+      borderRadius: 8,
+      background: '#f3f4f6',
+    } as CSSProperties,
+    rTitle: { fontWeight: 600, marginTop: 6, fontSize: 14 } as CSSProperties,
+    rCuisine: { color: '#666', fontSize: 12 } as CSSProperties,
+
+    // Users list
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -301,6 +327,8 @@ export default function CommunitySearch() {
       overflow: 'hidden',
       textOverflow: 'ellipsis',
     } as CSSProperties,
+
+    // Buttons
     btn: {
       border: '1px solid #e5e7eb',
       borderRadius: 6,
@@ -314,10 +342,17 @@ export default function CommunitySearch() {
       background: '#111827',
       color: '#fff',
     } as CSSProperties,
+    // NEW: green Friend button (to match your Friends modal)
+    btnGreen: {
+      border: '1px solid #4CAF50',
+      background: '#4CAF50',
+      color: '#fff',
+    } as CSSProperties,
     btnDisabled: {
       opacity: 0.6,
       cursor: 'default',
     } as CSSProperties,
+
     pager: { marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' } as CSSProperties,
     pagerBtn: {
       border: '1px solid #e5e7eb',
@@ -372,7 +407,7 @@ export default function CommunitySearch() {
           {loading && <div style={S.hint}>Searching…</div>}
           {!loading && errMsg && <div style={S.error}>{errMsg}</div>}
 
-          {/* Users tab */}
+          {/* Users list */}
           {!loading && !errMsg && tab === 'users' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 ? (
@@ -385,6 +420,7 @@ export default function CommunitySearch() {
                   let actionEl: JSX.Element = <span style={S.hint}>You</span>;
                   if (!isMe) {
                     if (relation === 'none' || relation === 'pending_outgoing') {
+                      // toggle: add / cancel
                       actionEl = (
                         <button
                           style={{
@@ -400,15 +436,17 @@ export default function CommunitySearch() {
                         </button>
                       );
                     } else if (relation === 'pending_incoming') {
+                      // read-only here
                       actionEl = (
                         <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
                           Requested
                         </button>
                       );
                     } else {
+                      // friends → green button like in Friends modal
                       actionEl = (
                         <button
-                          style={{ ...S.btn, cursor: 'pointer' }}
+                          style={{ ...S.btn, ...S.btnGreen, cursor: 'pointer' }}
                           onClick={() => handleUnfriend(p.id)}
                           title="Unfriend"
                         >
@@ -421,6 +459,7 @@ export default function CommunitySearch() {
                   return (
                     <div key={p.id} style={S.userRow}>
                       <Link href={`/profiles/${p.id}`} style={S.userLeftLink}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={p.avatar_url ?? '/avatar-placeholder.png'}
                           alt={p.display_name ?? 'user'}
@@ -438,27 +477,34 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Recipes tab */}
+          {/* Recipes grid */}
           {!loading && !errMsg && tab === 'recipes' && (
-            <>
+            <div style={S.cardList}>
               {recipes.length === 0 ? (
                 <div style={S.hint}>No recipes found.</div>
               ) : (
-                <div style={recipeGridStyle}>
-                  {recipes.map((r) => (
-                    <RecipeTile
-                      key={r.id}
-                      title={r.title}
-                      types={r.recipe_types ?? []}
-                      photoUrl={r.photo_url}
-                      onClick={() => openRecipe(r.id)}
-                    />
-                  ))}
-                </div>
+                recipes.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => openRecipe(r.id)}
+                    style={S.cardButton}
+                    aria-label={`Open ${r.title}`}
+                  >
+                    {r.photo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={r.photo_url} alt={r.title} style={S.image} />
+                    ) : (
+                      <div style={S.placeholder} />
+                    )}
+                    <div style={S.rTitle}>{r.title}</div>
+                    <div style={S.rCuisine}>{r.cuisine || '—'}</div>
+                  </button>
+                ))
               )}
-            </>
+            </div>
           )}
 
+          {/* Pager */}
           {!loading && (users.length > 0 || recipes.length > 0) && (
             <div style={S.pager}>
               <button
