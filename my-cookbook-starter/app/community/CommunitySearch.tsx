@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeBadges from '../components/RecipeBadges';
+import { RecipeTile, recipeGridStyle } from '../components/RecipeBadges';
 
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
 
@@ -21,8 +21,8 @@ type RecipeRow = {
   id: string;
   user_id: string;
   title: string;
-  cuisine: string | null;              // still allowed in search text; not displayed
-  recipe_types?: string[] | null;      // <-- NEW: what we display
+  cuisine: string | null;              // kept for search text, not displayed
+  recipe_types?: string[] | null;      // displayed (no fallback)
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
@@ -128,9 +128,7 @@ export default function CommunitySearch() {
         if (error) throw error;
 
         let rows = (data as RecipeRow[]) ?? [];
-
-        // Backfill both photo_url and recipe_types from the recipes table
-        rows = await backfillRecipeMeta(rows);
+        rows = await backfillRecipeMeta(rows); // ensure photo_url + recipe_types present
 
         setRecipes(rows);
         setHasMore(rows.length === PAGE_SIZE);
@@ -157,10 +155,7 @@ export default function CommunitySearch() {
 
     if (error || !data) return rows;
 
-    const metaMap = new Map<
-      string,
-      { photo_url: string | null; recipe_types: string[] | null }
-    >();
+    const metaMap = new Map<string, { photo_url: string | null; recipe_types: string[] | null }>();
     data.forEach((r: { id: string; photo_url: string | null; recipe_types: string[] | null }) => {
       metaMap.set(r.id, { photo_url: r.photo_url ?? null, recipe_types: r.recipe_types ?? null });
     });
@@ -281,39 +276,6 @@ export default function CommunitySearch() {
       minWidth: 0,
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
-
-    cardList: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
-      gap: 12,
-    } as CSSProperties,
-    cardButton: {
-      border: '1px solid #eee',
-      borderRadius: 12,
-      padding: 10,
-      background: '#fff',
-      textAlign: 'left' as const,
-      cursor: 'pointer',
-      width: '100%',
-    } as CSSProperties,
-    image: {
-      width: '100%',
-      aspectRatio: '4 / 3',
-      objectFit: 'cover',
-      borderRadius: 8,
-      display: 'block',
-      background: '#f3f4f6',
-    } as CSSProperties,
-    placeholder: {
-      width: '100%',
-      aspectRatio: '4 / 3',
-      borderRadius: 8,
-      background: '#f3f4f6',
-    } as CSSProperties,
-    rTitle: { fontWeight: 600, marginTop: 6, fontSize: 14 } as CSSProperties,
-    // Removed rCuisine visual (we render badges instead)
-    rTypesWrap: { marginTop: 4 } as CSSProperties,
-
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -356,10 +318,9 @@ export default function CommunitySearch() {
       opacity: 0.6,
       cursor: 'default',
     } as CSSProperties,
-
     pager: { marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' } as CSSProperties,
     pagerBtn: {
-      border: '1px solid #e5e7eb',
+      border: '1px solid '#e5e7eb',
       borderRadius: 6,
       padding: '6px 10px',
       fontSize: 12,
@@ -411,6 +372,7 @@ export default function CommunitySearch() {
           {loading && <div style={S.hint}>Searching…</div>}
           {!loading && errMsg && <div style={S.error}>{errMsg}</div>}
 
+          {/* Users tab */}
           {!loading && !errMsg && tab === 'users' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 ? (
@@ -476,31 +438,25 @@ export default function CommunitySearch() {
             </div>
           )}
 
+          {/* Recipes tab */}
           {!loading && !errMsg && tab === 'recipes' && (
-            <div style={S.cardList}>
+            <>
               {recipes.length === 0 ? (
                 <div style={S.hint}>No recipes found.</div>
               ) : (
-                recipes.map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => openRecipe(r.id)}
-                    style={S.cardButton}
-                    aria-label={`Open ${r.title}`}
-                  >
-                    {r.photo_url ? (
-                      <img src={r.photo_url} alt={r.title} style={S.image} />
-                    ) : (
-                      <div style={S.placeholder} />
-                    )}
-                    <div style={S.rTitle}>{r.title}</div>
-                    <div style={S.rTypesWrap}>
-                      <RecipeBadges types={r.recipe_types} />
-                    </div>
-                  </button>
-                ))
+                <div style={recipeGridStyle}>
+                  {recipes.map((r) => (
+                    <RecipeTile
+                      key={r.id}
+                      title={r.title}
+                      types={r.recipe_types ?? []}
+                      photoUrl={r.photo_url}
+                      onClick={() => openRecipe(r.id)}
+                    />
+                  ))}
+                </div>
               )}
-            </div>
+            </>
           )}
 
           {!loading && (users.length > 0 || recipes.length > 0) && (
