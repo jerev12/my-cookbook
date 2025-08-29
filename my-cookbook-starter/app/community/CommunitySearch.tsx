@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
-// 👉 Update this path if your modal is somewhere else:
+// ⬇️ Update this path if your modal sits elsewhere
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
 
 type TabKey = 'recipes' | 'users';
@@ -53,8 +53,9 @@ export default function CommunitySearch() {
   const [myId, setMyId] = useState<string | null>(null);
   const [friendStatus, setFriendStatus] = useState<Record<string, FriendRelation>>({});
 
-  // recipe modal
-  const [openRecipeId, setOpenRecipeId] = useState<string | null>(null);
+  // modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalRecipe, setModalRecipe] = useState<any>(null); // set to your Recipe type if you have one
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -144,6 +145,27 @@ export default function CommunitySearch() {
       setErrMsg(err?.message ?? 'Something went wrong while searching.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  // open modal with a fetched recipe object
+  async function openRecipe(rid: string) {
+    try {
+      setModalOpen(true);
+      setModalRecipe(null); // show modal; content loads shortly after
+
+      const { data, error } = await supabase
+        .from('recipes')
+        .select('id, title, cuisine, visibility, user_id, photo_url, instructions, source_url, created_at')
+        .eq('id', rid)
+        .single();
+
+      if (error) throw error;
+      setModalRecipe(data as any);
+    } catch (e: any) {
+      console.error(e);
+      setErrMsg(e?.message ?? 'Failed to load recipe.');
+      setModalOpen(false);
     }
   }
 
@@ -367,7 +389,6 @@ export default function CommunitySearch() {
           style={S.pill(tab === 'recipes')}
           onClick={() => setTab('recipes')}
         >
-        {/* order chosen for your default */}
           Recipes
         </button>
         <button
@@ -496,7 +517,7 @@ export default function CommunitySearch() {
                   <button
                     key={r.id}
                     style={S.cardButton}
-                    onClick={() => setOpenRecipeId(r.id)}
+                    onClick={() => openRecipe(r.id)}
                     aria-label={`Open ${r.title}`}
                   >
                     {/* Photo */}
@@ -549,10 +570,11 @@ export default function CommunitySearch() {
       )}
 
       {/* Recipe Modal */}
-      {openRecipeId && (
+      {modalOpen && (
         <RecipeModal
-          recipeId={openRecipeId}
-          onClose={() => setOpenRecipeId(null)}
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          recipe={modalRecipe}
         />
       )}
     </div>
@@ -562,8 +584,8 @@ export default function CommunitySearch() {
 function useDebounce<T>(value: T, delay = 300) {
   const [v, setV] = useState(value);
   useEffect(() => {
-    const t = setTimeout(() => setV(value), delay);
-    return () => clearTimeout(t);
+      const t = setTimeout(() => setV(value), delay);
+      return () => clearTimeout(t);
   }, [value, delay]);
   return v;
 }
