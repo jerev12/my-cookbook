@@ -107,7 +107,7 @@ function AddRecipeForm() {
   // form state
   const [title, setTitle] = useState('');
   const [cuisine, setCuisine] = useState('');
-  const [sourceUrl, setSourceUrl] = useState(''); // label shows "Recipe URL (optional)"
+  const [sourceUrl, setSourceUrl] = useState(''); // "Recipe URL (optional)"
   const [instructions, setInstructions] = useState(''); // one step per line
   const [ingredients, setIngredients] = useState<string[]>(['']);
   const [visibility, setVisibility] = useState<Visibility>('private');
@@ -180,7 +180,11 @@ function AddRecipeForm() {
       const [{ data: ingData, error: ingErr }, { data: stepData, error: stepErr }] =
         await Promise.all([
           supabase.from('recipe_ingredients').select('item_name').eq('recipe_id', editId),
-          supabase.from('recipe_steps').select('step_number, body').eq('recipe_id', editId).order('step_number'),
+          supabase
+            .from('recipe_steps')
+            .select('step_number, body')
+            .eq('recipe_id', editId)
+            .order('step_number'),
         ]);
 
       if (!mounted) return;
@@ -322,6 +326,49 @@ function AddRecipeForm() {
       setShowCropper(false);
     } catch (e: any) {
       setMsg(e?.message || 'Failed to remove photo.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* ------ DELETE RECIPE (Edit mode) ------ */
+  async function deleteRecipe() {
+    if (!isEditing || !editId) return;
+    const ok = typeof window !== 'undefined'
+      ? window.confirm('Delete this recipe? This will remove the photo, ingredients, and steps. This cannot be undone.')
+      : true;
+    if (!ok) return;
+
+    try {
+      setBusy(true);
+      setMsg(null);
+
+      const { data: userRes } = await supabase.auth.getUser();
+      const userId = userRes?.user?.id;
+      if (!userId) throw new Error('No signed-in user — please log in again.');
+
+      // 1) Delete photo from storage (if any)
+      const path = oldPhotoPathRef.current || (photoUrl ? storagePathFromPublicUrl(photoUrl) : null);
+      if (path) {
+        await supabase.storage.from('recipe-photos').remove([path]);
+      }
+
+      // 2) Delete child rows (if your DB doesn’t use ON DELETE CASCADE)
+      await supabase.from('recipe_ingredients').delete().eq('recipe_id', editId);
+      await supabase.from('recipe_steps').delete().eq('recipe_id', editId);
+
+      // 3) Delete the recipe row (owner-only per RLS policy)
+      const { error: delErr } = await supabase
+        .from('recipes')
+        .delete()
+        .eq('id', editId)
+        .eq('user_id', userId);
+      if (delErr) throw delErr;
+
+      // 4) Navigate away
+      router.replace('/cookbook');
+    } catch (e: any) {
+      setMsg(e?.message || 'Failed to delete recipe.');
     } finally {
       setBusy(false);
     }
@@ -716,6 +763,26 @@ function AddRecipeForm() {
             {busy ? 'Saving…' : isEditing ? 'Save Changes' : 'Save Recipe'}
           </button>
         </div>
+
+        {/* Danger zone: Delete (only in edit mode) */}
+        {isEditing && (
+          <div style={{ marginTop: 4 }}>
+            <button
+              type="button"
+              onClick={deleteRecipe}
+              style={{
+                width: '100%',
+                background: 'transparent',
+                border: '1px solid #ef4444',
+                color: '#ef4444',
+                borderRadius: 8,
+                padding: '12px 14px',
+              }}
+            >
+              Delete Recipe
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Cropper modal */}
