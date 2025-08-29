@@ -320,7 +320,7 @@ export default function CommunitySearch() {
     } as CSSProperties,
     pager: { marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' } as CSSProperties,
     pagerBtn: {
-      border: '1px solid '#e5e7eb',
+      border: '1px solid #e5e7eb',
       borderRadius: 6,
       padding: '6px 10px',
       fontSize: 12,
