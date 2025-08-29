@@ -252,7 +252,7 @@ export default function CommunitySearch() {
       display: 'block',
       width: '100%',
       padding: '10px 12px',
-      border: '1px solid '#e5e7eb',
+      border: '1px solid #e5e7eb',
       borderRadius: 8,
       boxSizing: 'border-box',
       fontSize: 14,
