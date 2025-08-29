@@ -401,7 +401,7 @@ export default function RecipeModal({
             style={{
               padding: 16,
               // keep last content above the fixed footer + safe area
-              paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + 16px + env(safe-area-inset-bottom))`,
+              paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + 4px + env(safe-area-inset-bottom))`,
             }}
           >
             {/* Title + cuisine */}
