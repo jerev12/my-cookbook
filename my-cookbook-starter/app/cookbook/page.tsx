@@ -7,15 +7,17 @@ import AuthGuard from '../components/AuthGuard';
 import FriendsListModal from '../components/FriendsListModal';
 import ProfileSection from '../components/ProfileSection';
 import RecipeModal from '../components/RecipeModal';
+import RecipeBadges from '../components/RecipeBadges';
 
 type Recipe = {
   id: string;
-  user_id: string;                // added for modal ownership/bookmarks
+  user_id: string;                // for modal ownership/bookmarks
   title: string;
-  cuisine: string | null;
+  cuisine: string | null;         // still in DB but not displayed
+  recipe_types: string[] | null;  // <-- NEW: what we display
   photo_url: string | null;
   source_url: string | null;
-  created_at: string | null;      // added for “Added on …”
+  created_at: string | null;      // for “Added on …”
 };
 
 export default function CookbookPage() {
@@ -33,7 +35,7 @@ export default function CookbookPage() {
   // “Recipes cooked” — placeholder for now (0).
   const [recipesCookedCount] = useState<number>(0);
 
-  // Recipe detail modal (now using shared RecipeModal)
+  // Recipe detail modal (shared RecipeModal)
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -57,10 +59,10 @@ export default function CookbookPage() {
         return;
       }
 
-      // Load my recipes (NOTE: include user_id & created_at for modal)
+      // Load my recipes (include user_id & created_at for modal)
       const { data, error } = await supabase
         .from('recipes')
-        .select('id,user_id,title,cuisine,photo_url,source_url,created_at')
+        .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at')
         .eq('user_id', uid)
         .order('created_at', { ascending: false });
 
@@ -125,7 +127,7 @@ export default function CookbookPage() {
   return (
     <AuthGuard>
       <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
-        {/* HEADER (unchanged) */}
+        {/* HEADER */}
         <header
           style={{
             display: 'flex',
@@ -150,12 +152,12 @@ export default function CookbookPage() {
           </a>
         </header>
 
-        {/* PROFILE (unchanged) */}
+        {/* PROFILE */}
         <section>
           <ProfileSection />
         </section>
 
-        {/* STATS ROW (unchanged) */}
+        {/* STATS ROW */}
         <div style={statWrap}>
           {/* Friends → opens modal */}
           <button
@@ -191,7 +193,7 @@ export default function CookbookPage() {
           </button>
         </div>
 
-        {/* YOUR RECIPES GRID (unchanged) */}
+        {/* YOUR RECIPES GRID */}
         <div ref={gridRef}>
           {loading ? (
             <div>Loading your recipes…</div>
@@ -229,6 +231,7 @@ export default function CookbookPage() {
                     textAlign: 'left',
                     cursor: 'pointer',
                   }}
+                  aria-label={`Open ${r.title}`}
                 >
                   {r.photo_url ? (
                     <img
@@ -242,18 +245,23 @@ export default function CookbookPage() {
                       }}
                     />
                   ) : null}
-                  <div style={{ fontWeight: 600, marginTop: 6, fontSize: 14 }}>{r.title}</div>
-                  <div style={{ color: '#666', fontSize: 12 }}>{r.cuisine || '—'}</div>
+                  <div style={{ fontWeight: 600, marginTop: 6, fontSize: 14 }}>
+                    {r.title}
+                  </div>
+                  {/* Recipe Type badges (no cuisine fallback) */}
+                  <div style={{ marginTop: 4 }}>
+                    <RecipeBadges types={r.recipe_types ?? []} />
+                  </div>
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {/* RECIPE DETAIL MODAL — replaced with shared component */}
+        {/* RECIPE DETAIL MODAL — shared component */}
         <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
 
-        {/* FRIENDS LIST MODAL (unchanged) */}
+        {/* FRIENDS LIST MODAL */}
         <FriendsListModal open={friendsOpen} onClose={() => setFriendsOpen(false)} />
       </div>
     </AuthGuard>
