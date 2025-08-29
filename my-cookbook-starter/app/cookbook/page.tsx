@@ -6,21 +6,16 @@ import { supabase } from '@/lib/supabaseClient';
 import AuthGuard from '../components/AuthGuard';
 import FriendsListModal from '../components/FriendsListModal';
 import ProfileSection from '../components/ProfileSection';
+import RecipeModal from '../components/RecipeModal';
 
 type Recipe = {
   id: string;
+  user_id: string;                // added for modal ownership/bookmarks
   title: string;
   cuisine: string | null;
   photo_url: string | null;
   source_url: string | null;
-};
-
-type Step = { step_number: number; body: string };
-type Ingredient = {
-  item_name: string;
-  quantity: number | null;
-  unit: string | null;
-  note: string | null;
+  created_at: string | null;      // added for “Added on …”
 };
 
 export default function CookbookPage() {
@@ -36,14 +31,11 @@ export default function CookbookPage() {
   const [friendCount, setFriendCount] = useState<number>(0);
 
   // “Recipes cooked” — placeholder for now (0).
-  // If/when you add a cook logs table, set this from DB.
   const [recipesCookedCount] = useState<number>(0);
 
-  // Recipe detail modal
+  // Recipe detail modal (now using shared RecipeModal)
   const [selected, setSelected] = useState<Recipe | null>(null);
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [ings, setIngs] = useState<Ingredient[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [open, setOpen] = useState(false);
 
   // Friends modal
   const [friendsOpen, setFriendsOpen] = useState(false);
@@ -65,10 +57,10 @@ export default function CookbookPage() {
         return;
       }
 
-      // Load my recipes
+      // Load my recipes (NOTE: include user_id & created_at for modal)
       const { data, error } = await supabase
         .from('recipes')
-        .select('id,title,cuisine,photo_url,source_url')
+        .select('id,user_id,title,cuisine,photo_url,source_url,created_at')
         .eq('user_id', uid)
         .order('created_at', { ascending: false });
 
@@ -86,23 +78,14 @@ export default function CookbookPage() {
     })();
   }, []);
 
-  async function openRecipe(r: Recipe) {
+  function openRecipe(r: Recipe) {
     setSelected(r);
-    setDetailLoading(true);
-    const [{ data: stepData }, { data: ingData }] = await Promise.all([
-      supabase
-        .from('recipe_steps')
-        .select('step_number,body')
-        .eq('recipe_id', r.id)
-        .order('step_number'),
-      supabase
-        .from('recipe_ingredients')
-        .select('item_name,quantity,unit,note')
-        .eq('recipe_id', r.id),
-    ]);
-    setSteps((stepData as Step[]) || []);
-    setIngs((ingData as Ingredient[]) || []);
-    setDetailLoading(false);
+    setOpen(true);
+  }
+
+  function closeRecipe() {
+    setOpen(false);
+    setSelected(null);
   }
 
   function scrollToGrid() {
@@ -111,10 +94,10 @@ export default function CookbookPage() {
     }
   }
 
-  // --- tiny mobile-first styles for the stat row ---
+  // --- tiny mobile-first styles for the stat row (unchanged) ---
   const statWrap: React.CSSProperties = {
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)', // always 3 across (your req)
+    gridTemplateColumns: 'repeat(3, 1fr)',
     gap: 8,
     marginTop: 12,
     marginBottom: 16,
@@ -130,7 +113,7 @@ export default function CookbookPage() {
   };
   const statNumber: React.CSSProperties = {
     fontWeight: 800,
-    fontSize: 20,          // compact for small screens; bump if you want larger
+    fontSize: 20,
     lineHeight: 1.1,
   };
   const statLabel: React.CSSProperties = {
@@ -142,13 +125,13 @@ export default function CookbookPage() {
   return (
     <AuthGuard>
       <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
-        {/* HEADER (kept), removed Logout from here */}
+        {/* HEADER (unchanged) */}
         <header
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginBottom: 12, // tighter for mobile
+            marginBottom: 12,
           }}
         >
           <h1 style={{ margin: 0, fontSize: 22 }}>My Cookbook</h1>
@@ -167,12 +150,12 @@ export default function CookbookPage() {
           </a>
         </header>
 
-        {/* ==== TOP: My Profile (read-only with Edit modal inside component) ==== */}
+        {/* PROFILE (unchanged) */}
         <section>
           <ProfileSection />
         </section>
 
-        {/* ==== STATS ROW (right under profile) ==== */}
+        {/* STATS ROW (unchanged) */}
         <div style={statWrap}>
           {/* Friends → opens modal */}
           <button
@@ -196,7 +179,7 @@ export default function CookbookPage() {
             <div style={statLabel}>My Recipes</div>
           </button>
 
-          {/* Recipes Cooked → scroll to grid (placeholder number) */}
+          {/* Recipes Cooked (placeholder) */}
           <button
             type="button"
             onClick={scrollToGrid}
@@ -208,7 +191,7 @@ export default function CookbookPage() {
           </button>
         </div>
 
-        {/* ==== YOUR RECIPES GRID ==== */}
+        {/* YOUR RECIPES GRID (unchanged) */}
         <div ref={gridRef}>
           {loading ? (
             <div>Loading your recipes…</div>
@@ -230,7 +213,7 @@ export default function CookbookPage() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', // smaller cards for mobile
+                gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
                 gap: 12,
               }}
             >
@@ -253,7 +236,7 @@ export default function CookbookPage() {
                       alt={r.title}
                       style={{
                         width: '100%',
-                        aspectRatio: '4/3',   // a bit taller for mobile
+                        aspectRatio: '4/3',
                         objectFit: 'cover',
                         borderRadius: 8,
                       }}
@@ -267,106 +250,10 @@ export default function CookbookPage() {
           )}
         </div>
 
-        {/* ==== RECIPE DETAIL MODAL (unchanged) ==== */}
-        {selected && (
-          <div
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0,0,0,.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 12,
-              zIndex: 50,
-            }}
-            onClick={() => setSelected(null)}
-          >
-            <div
-              style={{
-                width: 'min(800px, 94vw)',
-                background: '#fff',
-                borderRadius: 12,
-                padding: 16,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>
-                    {selected.title}
-                  </div>
-                  <div style={{ color: '#666' }}>{selected.cuisine || ''}</div>
-                </div>
-                <button onClick={() => setSelected(null)} aria-label="Close">
-                  ✕
-                </button>
-              </div>
+        {/* RECIPE DETAIL MODAL — replaced with shared component */}
+        <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
 
-              <div style={{ display: 'grid', gap: 12, marginTop: 10 }}>
-                <section>
-                  <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
-                  {detailLoading ? (
-                    <div>Loading…</div>
-                  ) : (
-                    <ul style={{ paddingLeft: 16 }}>
-                      {ings.length ? (
-                        ings.map((i, idx) => {
-                          const qty = i.quantity ?? '';
-                          const parts = [qty, i.unit, i.item_name]
-                            .filter(Boolean)
-                            .join(' ');
-                          return (
-                            <li key={idx}>
-                              {parts}
-                              {i.note ? ` (${i.note})` : ''}
-                            </li>
-                          );
-                        })
-                      ) : (
-                        <li>No ingredients yet.</li>
-                      )}
-                    </ul>
-                  )}
-                </section>
-
-                <section>
-                  <h3 style={{ margin: '8px 0' }}>Instructions</h3>
-                  {detailLoading ? (
-                    <div>Loading…</div>
-                  ) : (
-                    <ol style={{ paddingLeft: 18 }}>
-                      {steps.length ? (
-                        steps.map((s, idx) => <li key={idx}>{s.body}</li>)
-                      ) : (
-                        <li>This recipe has no steps yet.</li>
-                      )}
-                    </ol>
-                  )}
-                </section>
-
-                {selected.source_url ? (
-                  <a
-                    href={selected.source_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: '#0b5' }}
-                  >
-                    Open Source
-                  </a>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ==== FRIENDS LIST MODAL ==== */}
+        {/* FRIENDS LIST MODAL (unchanged) */}
         <FriendsListModal open={friendsOpen} onClose={() => setFriendsOpen(false)} />
       </div>
     </AuthGuard>
