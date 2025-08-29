@@ -12,26 +12,24 @@ type IngredientRow = {
   quantity?: number | null;
   unit?: string | null;
   note?: string | null;
+};
 
-  // NEW (optional in DB, used when present)
-  section_label?: string | null;
+type DBIngredient = {
+  item_name: string;
+  quantity: number | null;
+  unit: string | null;
+  note: string | null;
+  section_label: string | null;
   ingredient_order?: number | null;
 };
 
-type StepRow = {
+type DBStep = {
   step_number: number;
   body: string;
-  section_label?: string | null;
+  section_label: string | null;
 };
 
-type ComponentBlock = {
-  id: string;
-  name: string;
-  ingredients: string[];   // simple strings per component
-  instructions: string;    // multiline textarea; split into steps on save
-};
-
-// Suggested recipe type options (customize anytime)
+// Suggested recipe type options (you can change these anytime)
 const RECIPE_TYPE_OPTIONS = [
   'Breakfast',
   'Lunch',
@@ -44,7 +42,7 @@ const RECIPE_TYPE_OPTIONS = [
   'Drink',
 ];
 
-/* ----------------- helpers ----------------- */
+// ---------- Helpers ----------
 async function getCroppedBlob(
   imageSrc: string,
   crop: { x: number; y: number; width: number; height: number }
@@ -77,23 +75,7 @@ function storagePathFromPublicUrl(publicUrl: string): string | null {
   }
 }
 
-// Build a single instructions blob from components for recipes.instructions (NOT NULL)
-function buildCollapsedInstructions(components: ComponentBlock[]): string {
-  const parts: string[] = [];
-  components.forEach((c) => {
-    const name = (c.name || 'Main').trim();
-    if (name) parts.push(`${name}:`);
-    const steps = c.instructions
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    steps.forEach((body, i) => parts.push(`${i + 1}. ${body}`));
-    parts.push(''); // spacing between components
-  });
-  return parts.join('\n').trim();
-}
-
-/* ----------------- page wrapper ----------------- */
+// ---------- Page wrapper ----------
 export default function AddRecipePage() {
   return (
     <Suspense fallback={<div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>Loading…</div>}>
@@ -102,7 +84,7 @@ export default function AddRecipePage() {
   );
 }
 
-/* ----------------- styles ----------------- */
+// ---------- Reusable field style ----------
 const fieldStyle: React.CSSProperties = {
   width: '100%',
   padding: 8,
@@ -111,6 +93,8 @@ const fieldStyle: React.CSSProperties = {
   background: '#fff',
   boxSizing: 'border-box',
 };
+
+// ---------- Chip styles ----------
 const chipBase: React.CSSProperties = {
   padding: '6px 10px',
   borderRadius: 999,
@@ -126,264 +110,16 @@ const chipActive: React.CSSProperties = {
   border: '1px solid #111827',
 };
 
-/* ----------------- components editor ----------------- */
-function ComponentsEditor({
-  components,
-  setComponents,
-}: {
-  components: ComponentBlock[];
-  setComponents: React.Dispatch<React.SetStateAction<ComponentBlock[]>>;
-}) {
-  function addComponent() {
-    setComponents((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        name: `Component ${prev.length + 1}`,
-        ingredients: [''],
-        instructions: '',
-      },
-    ]);
-  }
-  function removeComponent(id: string) {
-    setComponents((prev) => prev.filter((c) => c.id !== id));
-  }
-  function move(id: string, dir: -1 | 1) {
-    setComponents((prev) => {
-      const idx = prev.findIndex((c) => c.id === id);
-      if (idx === -1) return prev;
-      const swap = idx + dir;
-      if (swap < 0 || swap >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[swap]] = [next[swap], next[idx]];
-      return next;
-    });
-  }
-  const inputStyle: React.CSSProperties = fieldStyle;
+// ---------- Component types ----------
+type UiComponent = {
+  id: string;
+  title: string;
+  ingredients: string[];    // simple item lines
+  instructions: string;     // one step per line
+  collapsed?: boolean;
+};
 
-  return (
-    <section
-      style={{
-        background: '#fff',
-        border: '1px solid #eee',
-        borderRadius: 12,
-        padding: 14,
-        display: 'grid',
-        gap: 12,
-      }}
-    >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Components</h3>
-        <button
-          type="button"
-          onClick={addComponent}
-          style={{
-            background: 'transparent',
-            border: '1px dashed #cbd5e1',
-            padding: '8px 12px',
-            borderRadius: 8,
-          }}
-        >
-          + Add component
-        </button>
-      </div>
-
-      {components.length === 0 ? (
-        <div style={{ color: '#6b7280', fontSize: 13 }}>
-          No components yet. Add one to start.
-        </div>
-      ) : (
-        components.map((comp, i) => (
-          <div
-            key={comp.id}
-            style={{
-              border: '1px solid #f1f5f9',
-              borderRadius: 10,
-              padding: 12,
-              display: 'grid',
-              gap: 10,
-            }}
-          >
-            {/* Header row: name + actions */}
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr auto',
-                gap: 8,
-                alignItems: 'center',
-              }}
-            >
-              <input
-                value={comp.name}
-                onChange={(e) =>
-                  setComponents((prev) =>
-                    prev.map((c) => (c.id === comp.id ? { ...c, name: e.target.value } : c))
-                  )
-                }
-                placeholder="Component name (e.g., Cake, Frosting)"
-                style={inputStyle}
-              />
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => move(comp.id, -1)}
-                  disabled={i === 0}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 8,
-                    padding: '8px 10px',
-                    opacity: i === 0 ? 0.5 : 1,
-                  }}
-                  title="Move up"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  onClick={() => move(comp.id, +1)}
-                  disabled={i === components.length - 1}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 8,
-                    padding: '8px 10px',
-                    opacity: i === components.length - 1 ? 0.5 : 1,
-                  }}
-                  title="Move down"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeComponent(comp.id)}
-                  style={{
-                    background: 'transparent',
-                    border: '1px solid #ef4444',
-                    color: '#ef4444',
-                    borderRadius: 8,
-                    padding: '8px 10px',
-                  }}
-                  title="Remove component"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-
-            {/* Ingredients for this component */}
-            <div style={{ display: 'grid', gap: 6 }}>
-              <label style={{ fontWeight: 600 }}>Ingredients</label>
-              <div style={{ display: 'grid', gap: 6 }}>
-                {comp.ingredients.map((val, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr auto',
-                      gap: 6,
-                    }}
-                  >
-                    <input
-                      value={val}
-                      onChange={(e) =>
-                        setComponents((prev) =>
-                          prev.map((c) =>
-                            c.id === comp.id
-                              ? {
-                                  ...c,
-                                  ingredients: c.ingredients.map((iv, ii) =>
-                                    ii === idx ? e.target.value : iv
-                                  ),
-                                }
-                              : c
-                          )
-                        )
-                      }
-                      placeholder={`Ingredient ${idx + 1}`}
-                      style={inputStyle}
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setComponents((prev) =>
-                          prev.map((c) =>
-                            c.id === comp.id
-                              ? {
-                                  ...c,
-                                  ingredients: c.ingredients.filter((_, ii) => ii !== idx),
-                                }
-                              : c
-                          )
-                        )
-                      }
-                      style={{
-                        background: 'transparent',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: 6,
-                        padding: '8px 10px',
-                      }}
-                      title="Remove ingredient"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setComponents((prev) =>
-                      prev.map((c) =>
-                        c.id === comp.id
-                          ? { ...c, ingredients: [...c.ingredients, ''] }
-                          : c
-                      )
-                    )
-                  }
-                  style={{
-                    background: 'transparent',
-                    border: '1px dashed #cbd5e1',
-                    padding: '8px 12px',
-                    borderRadius: 8,
-                  }}
-                >
-                  + Add ingredient
-                </button>
-              </div>
-            </div>
-
-            {/* Instructions for this component */}
-            <div style={{ display: 'grid', gap: 6 }}>
-              <label style={{ fontWeight: 600 }}>
-                Instructions{' '}
-                <span style={{ color: '#6b7280', fontWeight: 400 }}>
-                  (one step per line)
-                </span>
-              </label>
-              <textarea
-                value={comp.instructions}
-                onChange={(e) =>
-                  setComponents((prev) =>
-                    prev.map((c) =>
-                      c.id === comp.id ? { ...c, instructions: e.target.value } : c
-                    )
-                  )
-                }
-                rows={6}
-                placeholder={`1. Do something...\n2. Do next thing...\n3. ...`}
-                style={{ ...fieldStyle, resize: 'vertical', minHeight: 120 }}
-              />
-            </div>
-          </div>
-        ))
-      )}
-    </section>
-  );
-}
-
-/* ----------------- main form ----------------- */
+// ---------- Main component ----------
 function AddRecipeForm() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -396,19 +132,21 @@ function AddRecipeForm() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  // form state
+  // form state (core)
   const [title, setTitle] = useState('');
   const [cuisine, setCuisine] = useState('');
   const [sourceUrl, setSourceUrl] = useState('');
   const [visibility, setVisibility] = useState<Visibility>('private');
-
-  // recipe types (multi-select)
   const [recipeTypes, setRecipeTypes] = useState<string[]>([]);
 
-  // NEW: components (sections)
-  const [components, setComponents] = useState<ComponentBlock[]>([
-    { id: crypto.randomUUID(), name: 'Main', ingredients: [''], instructions: '' },
-  ]);
+  // simple (non-component) fields (default view)
+  const [ingredients, setIngredients] = useState<string[]>(['']);
+  const [instructions, setInstructions] = useState('');
+
+  // component mode toggle + data
+  const [useComponents, setUseComponents] = useState(false);
+  const [components, setComponents] = useState<UiComponent[]>([]);
+  const [showInfo, setShowInfo] = useState(false);
 
   // photo state
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -420,7 +158,7 @@ function AddRecipeForm() {
   const [croppedPixels, setCroppedPixels] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  /* ------ auth ------ */
+  // ------ AUTH LOAD ------
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -433,7 +171,7 @@ function AddRecipeForm() {
     return () => sub?.subscription?.unsubscribe();
   }, []);
 
-  /* ------ prefill (edit mode) ------ */
+  // ------ PREFILL (EDIT MODE) ------
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -443,7 +181,7 @@ function AddRecipeForm() {
 
       const { data: recs, error: recErr } = await supabase
         .from('recipes')
-        .select('id, user_id, title, cuisine, source_url, visibility, photo_url, recipe_types')
+        .select('id, user_id, title, cuisine, source_url, visibility, photo_url, recipe_types, instructions')
         .eq('id', editId)
         .limit(1);
 
@@ -453,7 +191,7 @@ function AddRecipeForm() {
         setBusy(false);
         return;
       }
-      const r = (recs as any)?.[0];
+      const r = recs?.[0] as any;
       if (!r) {
         setMsg('Recipe not found.');
         setBusy(false);
@@ -468,10 +206,10 @@ function AddRecipeForm() {
       setRecipeTypes(Array.isArray(r.recipe_types) ? r.recipe_types : []);
       oldPhotoPathRef.current = r.photo_url ? storagePathFromPublicUrl(r.photo_url) : null;
 
-      // load ingredients & steps with section labels
+      // Load ingredients & steps with section labels to detect components
       const [{ data: ingData, error: ingErr }, { data: stepData, error: stepErr }] = await Promise.all([
-        supabase.from('recipe_ingredients').select('item_name, section_label, ingredient_order').eq('recipe_id', editId).order('ingredient_order', { ascending: true }),
-        supabase.from('recipe_steps').select('step_number, body, section_label').eq('recipe_id', editId).order('step_number', { ascending: true }),
+        supabase.from('recipe_ingredients').select('item_name,section_label,ingredient_order').eq('recipe_id', editId).order('ingredient_order', { ascending: true }),
+        supabase.from('recipe_steps').select('step_number,body,section_label').eq('recipe_id', editId).order('step_number'),
       ]);
       if (!mounted) return;
 
@@ -481,73 +219,80 @@ function AddRecipeForm() {
         return;
       }
 
-      // rebuild components from section_label (fallback to "Main")
-      const sectionMap = new Map<string, { ingredients: string[]; steps: string[] }>();
-      (ingData ?? []).forEach((i: any) => {
-        const key = i.section_label || 'Main';
-        if (!sectionMap.has(key)) sectionMap.set(key, { ingredients: [], steps: [] });
-        sectionMap.get(key)!.ingredients.push(i.item_name);
-      });
-      (stepData ?? []).forEach((s: any) => {
-        const key = s.section_label || 'Main';
-        if (!sectionMap.has(key)) sectionMap.set(key, { ingredients: [], steps: [] });
-        sectionMap.get(key)!.steps.push(s.body);
-      });
+      const ings = (ingData as DBIngredient[]) ?? [];
+      const steps = (stepData as DBStep[]) ?? [];
 
-      const rebuilt: ComponentBlock[] =
-        sectionMap.size > 0
-          ? Array.from(sectionMap.entries()).map(([name, b]) => ({
-              id: crypto.randomUUID(),
-              name,
-              ingredients: b.ingredients.length ? b.ingredients : [''],
-              instructions: b.steps.join('\n'),
-            }))
-          : [
-              { id: crypto.randomUUID(), name: 'Main', ingredients: [''], instructions: '' },
-            ];
+      // Determine if we should enter component mode
+      const labels = new Set(
+        [...ings.map(i => (i.section_label ?? 'Main').trim() || 'Main'),
+         ...steps.map(s => (s.section_label ?? 'Main').trim() || 'Main')]
+      );
+      const hasMultiple = labels.size > 1 || (labels.size === 1 && !labels.has('Main'));
 
-      setComponents(rebuilt);
+      if (hasMultiple) {
+        // Build components from labels
+        const orderedLabels = Array.from(labels);
+        const built: UiComponent[] = orderedLabels.map(lbl => {
+          const ingList = ings
+            .filter(i => (i.section_label ?? 'Main') === lbl)
+            .map(i => i.item_name);
+          const stepLines = steps
+            .filter(s => (s.section_label ?? 'Main') === lbl)
+            .sort((a, b) => a.step_number - b.step_number)
+            .map(s => s.body)
+            .join('\n');
+          return {
+            id: crypto.randomUUID(),
+            title: lbl,
+            ingredients: ingList.length ? ingList : [''],
+            instructions: stepLines,
+            collapsed: false,
+          };
+        });
+        setComponents(built);
+        setUseComponents(true);
+        // hide simple fields
+        setIngredients(['']);
+        setInstructions('');
+      } else {
+        // Simple mode: fill simple fields
+        const ingStrings = ings.length ? ings.map(i => i.item_name) : [''];
+        setIngredients(ingStrings);
+        const stepLines = steps.sort((a,b)=>a.step_number-b.step_number).map(s => s.body);
+        setInstructions(stepLines.join('\n'));
+        setUseComponents(false);
+        setComponents([]);
+      }
+
       setBusy(false);
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [isEditing, editId]);
 
-  /* ------ photo handlers ------ */
-  function onPickFile() {
-    fileInputRef.current?.click();
-  }
+  // ------ PHOTO HANDLERS ------
+  function onPickFile() { fileInputRef.current?.click(); }
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
+    const f = e.target.files?.[0]; if (!f) return;
     const url = URL.createObjectURL(f);
     setLocalPhotoSrc(url);
     setShowCropper(true);
-    setZoom(1);
-    setCrop({ x: 0, y: 0 });
+    setZoom(1); setCrop({ x: 0, y: 0 });
   }
-  function onCropComplete(_: any, areaPixels: any) {
-    setCroppedPixels(areaPixels);
-  }
+  function onCropComplete(_: any, areaPixels: any) { setCroppedPixels(areaPixels); }
 
   async function confirmCrop() {
     if (!localPhotoSrc || !croppedPixels) return;
     try {
-      setBusy(true);
-      setMsg(null);
+      setBusy(true); setMsg(null);
       const blob = await getCroppedBlob(localPhotoSrc, croppedPixels);
       const { data: userRes } = await supabase.auth.getUser();
-      const userId = userRes?.user?.id;
-      if (!userId) throw new Error('No signed-in user — please log in again.');
+      const userId = userRes?.user?.id; if (!userId) throw new Error('No signed-in user — please log in again.');
 
       const base = (sp.get('id') || crypto.randomUUID()).toString();
       const filename = `${base}-${Date.now()}.jpg`;
       const newPath = `${userId}/${filename}`;
 
-      const upRes = await supabase.storage.from('recipe-photos').upload(newPath, blob, {
-        contentType: 'image/jpeg',
-      });
+      const upRes = await supabase.storage.from('recipe-photos').upload(newPath, blob, { contentType: 'image/jpeg' });
       if (upRes.error) throw upRes.error;
 
       const { data: pub } = supabase.storage.from('recipe-photos').getPublicUrl(newPath);
@@ -581,17 +326,12 @@ function AddRecipeForm() {
 
   async function removePhoto() {
     if (!photoUrl) return;
-    const ok =
-      typeof window !== 'undefined'
-        ? window.confirm('Remove this photo? This cannot be undone.')
-        : true;
+    const ok = typeof window !== 'undefined' ? window.confirm('Remove this photo? This cannot be undone.') : true;
     if (!ok) return;
     try {
-      setBusy(true);
-      setMsg(null);
+      setBusy(true); setMsg(null);
       const { data: userRes } = await supabase.auth.getUser();
-      const userId = userRes?.user?.id;
-      if (!userId) throw new Error('No signed-in user — please log in again.');
+      const userId = userRes?.user?.id; if (!userId) throw new Error('No signed-in user — please log in again.');
 
       const path = oldPhotoPathRef.current || storagePathFromPublicUrl(photoUrl);
       if (path) await supabase.storage.from('recipe-photos').remove([path]);
@@ -616,25 +356,19 @@ function AddRecipeForm() {
     }
   }
 
-  /* ------ delete recipe (edit mode) ------ */
+  // ------ DELETE RECIPE (Edit mode) ------
   async function deleteRecipe() {
     if (!isEditing || !editId) return;
-    const ok =
-      typeof window !== 'undefined'
-        ? window.confirm(
-            'Delete this recipe? This will remove the photo, ingredients, and steps. This cannot be undone.'
-          )
-        : true;
+    const ok = typeof window !== 'undefined'
+      ? window.confirm('Delete this recipe? This will remove the photo, ingredients, and steps. This cannot be undone.')
+      : true;
     if (!ok) return;
     try {
-      setBusy(true);
-      setMsg(null);
+      setBusy(true); setMsg(null);
       const { data: userRes } = await supabase.auth.getUser();
-      const userId = userRes?.user?.id;
-      if (!userId) throw new Error('No signed-in user — please log in again.');
+      const userId = userRes?.user?.id; if (!userId) throw new Error('No signed-in user — please log in again.');
 
-      const path =
-        oldPhotoPathRef.current || (photoUrl ? storagePathFromPublicUrl(photoUrl) : null);
+      const path = oldPhotoPathRef.current || (photoUrl ? storagePathFromPublicUrl(photoUrl) : null);
       if (path) await supabase.storage.from('recipe-photos').remove([path]);
 
       await supabase.from('recipe_ingredients').delete().eq('recipe_id', editId);
@@ -655,99 +389,233 @@ function AddRecipeForm() {
     }
   }
 
-  /* ------ submit ------ */
+  // ------ COMPONENT HELPERS ------
+  function enterComponentModeFromSimple() {
+    // Build a single "Main" component using existing simple fields
+    const first: UiComponent = {
+      id: crypto.randomUUID(),
+      title: 'Main',
+      ingredients: ingredients.length ? ingredients : [''],
+      instructions: instructions,
+      collapsed: false,
+    };
+    setComponents([first]);
+    setUseComponents(true);
+  }
+  function addComponent() {
+    setComponents(prev => [
+      ...prev,
+      { id: crypto.randomUUID(), title: `Component ${prev.length + 1}`, ingredients: [''], instructions: '', collapsed: false },
+    ]);
+  }
+  function deleteComponent(id: string) {
+    setComponents(prev => prev.filter(c => c.id !== id));
+  }
+  function toggleCollapsed(id: string) {
+    setComponents(prev => prev.map(c => c.id === id ? { ...c, collapsed: !c.collapsed } : c));
+  }
+  function updateComponentTitle(id: string, val: string) {
+    setComponents(prev => prev.map(c => c.id === id ? { ...c, title: val } : c));
+  }
+  function updateComponentIngredients(id: string, idx: number, val: string) {
+    setComponents(prev => prev.map(c => {
+      if (c.id !== id) return c;
+      const list = [...c.ingredients];
+      list[idx] = val;
+      return { ...c, ingredients: list };
+    }));
+  }
+  function addComponentIngredientRow(id: string) {
+    setComponents(prev => prev.map(c => c.id === id ? { ...c, ingredients: [...c.ingredients, ''] } : c));
+  }
+  function updateComponentInstructions(id: string, val: string) {
+    setComponents(prev => prev.map(c => c.id === id ? { ...c, instructions: val } : c));
+  }
+
+  // ------ SUBMIT ------
   async function submit() {
     setMsg(null);
-
     if (!title.trim()) return setMsg('Please add a title');
 
-    // Ensure each component has at least one instruction line total
-    const hasAnyStep = components.some((c) =>
-      c.instructions.split('\n').map((s) => s.trim()).filter(Boolean).length > 0
-    );
-    if (!hasAnyStep) {
-      return setMsg('Add instructions (at least one step in any component)');
+    // Validate depending on mode
+    if (!useComponents) {
+      if (!instructions.trim()) return setMsg('Add instructions (one step per line)');
+    } else {
+      // ensure at least one component has content
+      if (components.length === 0) return setMsg('Add at least one component or switch back to simple mode.');
+      const anySteps = components.some(c => c.instructions.trim().length > 0);
+      if (!anySteps) return setMsg('Each recipe needs instructions. Add steps to at least one component.');
     }
 
     const { data: userRes } = await supabase.auth.getUser();
     const userId = userRes?.user?.id;
-    if (!userId) {
-      setMsg('No signed-in user — please log in again.');
-      return;
-    }
+    if (!userId) { setMsg('No signed-in user — please log in again.'); return; }
 
     setBusy(true);
 
-    // Build flattened arrays with section labels
-    const ingArray: IngredientRow[] = components.flatMap((comp) =>
-      comp.ingredients
-        .map((txt) => txt.trim())
-        .filter(Boolean)
-        .map((item_name, idx) => ({
-          item_name,
-          section_label: comp.name || null,
-          ingredient_order: idx + 1,
-        }))
-    );
-
-    const steps: StepRow[] = components.flatMap((comp) => {
-      const lines = comp.instructions
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      return lines.map((body, i) => ({
-        step_number: i + 1, // numbering restarts per component
-        body,
-        section_label: comp.name || null,
-      }));
-    });
-
-    // Collapsed instructions blob for recipes.instructions NOT NULL
-    const collapsedInstructions = buildCollapsedInstructions(components);
-
     try {
+      // ---- EDIT MODE ----
       if (isEditing && editId) {
-        // transactional update RPC
-        const { error: upErr } = await supabase.rpc('update_full_recipe', {
-          p_recipe_id: editId,
-          p_title: title,
-          p_cuisine: cuisine || null,
-          p_photo_url: photoUrl || null,
-          p_source_url: sourceUrl || null,
-          p_instructions: collapsedInstructions,
-          p_ingredients: ingArray as any,
-          p_steps: steps as any,
-          p_visibility: visibility,
-          p_recipe_types: recipeTypes || [],
-        });
+        // Update core recipe data
+        const { error: upErr } = await supabase
+          .from('recipes')
+          .update({
+            title,
+            cuisine: cuisine || null,
+            source_url: sourceUrl || null,
+            visibility,
+            photo_url: photoUrl || null,
+            recipe_types: recipeTypes,
+            // keep instructions text (used for ordering hints). If in component mode, we keep as concatenation of headings + steps:
+            instructions: useComponents
+              ? components.map(c => `${(c.title || 'Main').trim() || 'Main'}:\n${c.instructions.trim()}\n`).join('\n')
+              : instructions,
+          })
+          .eq('id', editId)
+          .eq('user_id', userId);
         if (upErr) throw upErr;
+
+        // Replace child rows
+        const [{ error: d1 }, { error: d2 }] = await Promise.all([
+          supabase.from('recipe_ingredients').delete().eq('recipe_id', editId),
+          supabase.from('recipe_steps').delete().eq('recipe_id', editId),
+        ]);
+        if (d1 || d2) throw (d1 || d2);
+
+        if (!useComponents) {
+          // SIMPLE: ingredients + steps from simple fields
+          const ingArray: IngredientRow[] = (ingredients || [])
+            .map(i => i.trim()).filter(Boolean).map(item_name => ({ item_name }));
+          const steps = (instructions || '')
+            .split('\n').map(s => s.trim()).filter(Boolean)
+            .map((body, i) => ({ step_number: i + 1, body }));
+
+          if (ingArray.length) {
+            const { error } = await supabase
+              .from('recipe_ingredients')
+              .insert(ingArray.map(row => ({ ...row, recipe_id: editId, section_label: 'Main', ingredient_order: null } as any)));
+            if (error) throw error;
+          }
+          if (steps.length) {
+            const { error } = await supabase
+              .from('recipe_steps')
+              .insert(steps.map(s => ({ ...s, recipe_id: editId, section_label: 'Main' } as any)));
+            if (error) throw error;
+          }
+        } else {
+          // COMPONENT MODE
+          // Flatten ingredients and steps with section labels
+          const flatIngs: DBIngredient[] = [];
+          const flatSteps: DBStep[] = [];
+          components.forEach((c) => {
+            const label = (c.title || 'Main').trim() || 'Main';
+            c.ingredients
+              .map(t => t.trim())
+              .filter(Boolean)
+              .forEach((item_name, idx) => {
+                flatIngs.push({ item_name, quantity: null, unit: null, note: null, section_label: label, ingredient_order: idx + 1 });
+              });
+            const lines = c.instructions.split('\n').map(s => s.trim()).filter(Boolean);
+            lines.forEach((body, i) => {
+              flatSteps.push({ step_number: flatSteps.length + 1, body, section_label: label });
+            });
+          });
+
+          if (flatIngs.length) {
+            const { error } = await supabase.from('recipe_ingredients').insert(
+              flatIngs.map(r => ({ ...r, recipe_id: editId }))
+            );
+            if (error) throw error;
+          }
+          if (flatSteps.length) {
+            const { error } = await supabase.from('recipe_steps').insert(
+              flatSteps.map(s => ({ ...s, recipe_id: editId }))
+            );
+            if (error) throw error;
+          }
+        }
 
         router.replace('/cookbook');
         return;
       }
 
-      // transactional create RPC
-      const { error } = await supabase.rpc('add_full_recipe', {
-        p_title: title,
-        p_cuisine: cuisine || null,
-        p_photo_url: photoUrl || null,
-        p_source_url: sourceUrl || null,
-        p_instructions: collapsedInstructions,
-        p_ingredients: ingArray as any,
-        p_steps: steps as any,
-        p_visibility: visibility,
-        p_recipe_types: recipeTypes || [],
-      });
-      if (error) throw error;
+      // ---- CREATE MODE ----
+      if (!useComponents) {
+        // SIMPLE: use your existing RPC
+        const ingArray: IngredientRow[] = (ingredients || [])
+          .map(i => i.trim()).filter(Boolean).map(item_name => ({ item_name }));
+        const steps = (instructions || '')
+          .split('\n').map(s => s.trim()).filter(Boolean)
+          .map((body, i) => ({ step_number: i + 1, body }));
 
-      // Reset
-      setTitle('');
-      setCuisine('');
-      setSourceUrl('');
-      setVisibility('private');
-      setPhotoUrl(null);
-      setRecipeTypes([]);
-      setComponents([{ id: crypto.randomUUID(), name: 'Main', ingredients: [''], instructions: '' }]);
+        const { error } = await supabase.rpc('add_full_recipe', {
+          p_title: title,
+          p_cuisine: cuisine || null,
+          p_photo_url: photoUrl || null,
+          p_source_url: sourceUrl || null,
+          p_instructions: instructions,
+          p_ingredients: ingArray,
+          p_steps: steps,
+          p_visibility: visibility,
+          p_recipe_types: recipeTypes,
+        });
+        if (error) throw error;
+      } else {
+        // COMPONENT MODE: create recipe row, then insert labeled children
+        const instrForHints = components
+          .map(c => `${(c.title || 'Main').trim() || 'Main'}:\n${c.instructions.trim()}\n`).join('\n');
+
+        const { data: inserted, error: insErr } = await supabase
+          .from('recipes')
+          .insert({
+            title,
+            cuisine: cuisine || null,
+            source_url: sourceUrl || null,
+            visibility,
+            photo_url: photoUrl || null,
+            recipe_types: recipeTypes,
+            instructions: instrForHints, // keep headings for modal ordering hints
+          })
+          .select('id')
+          .single();
+        if (insErr) throw insErr;
+        const newId = (inserted as any).id as string;
+
+        const flatIngs: DBIngredient[] = [];
+        const flatSteps: DBStep[] = [];
+        components.forEach((c) => {
+          const label = (c.title || 'Main').trim() || 'Main';
+          c.ingredients
+            .map(t => t.trim())
+            .filter(Boolean)
+            .forEach((item_name, idx) => {
+              flatIngs.push({ item_name, quantity: null, unit: null, note: null, section_label: label, ingredient_order: idx + 1 });
+            });
+          const lines = c.instructions.split('\n').map(s => s.trim()).filter(Boolean);
+          lines.forEach((body) => {
+            flatSteps.push({ step_number: flatSteps.length + 1, body, section_label: label });
+          });
+        });
+
+        if (flatIngs.length) {
+          const { error } = await supabase.from('recipe_ingredients').insert(
+            flatIngs.map(r => ({ ...r, recipe_id: newId }))
+          );
+          if (error) throw error;
+        }
+        if (flatSteps.length) {
+          const { error } = await supabase.from('recipe_steps').insert(
+            flatSteps.map(s => ({ ...s, recipe_id: newId }))
+          );
+          if (error) throw error;
+        }
+      }
+
+      // Reset + go back
+      setTitle(''); setCuisine(''); setSourceUrl('');
+      setInstructions(''); setIngredients(['']); setVisibility('private');
+      setPhotoUrl(null); setRecipeTypes([]);
+      setUseComponents(false); setComponents([]);
       oldPhotoPathRef.current = null;
 
       router.replace('/cookbook');
@@ -758,11 +626,8 @@ function AddRecipeForm() {
     }
   }
 
-  /* ------ UI states ------ */
-  if (loading)
-    return (
-      <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>Loading…</div>
-    );
+  // ------ UI STATES ------
+  if (loading) return <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>Loading…</div>;
   if (!session) {
     return (
       <div style={{ maxWidth: 720, margin: '40px auto', padding: 16 }}>
@@ -773,132 +638,45 @@ function AddRecipeForm() {
     );
   }
 
-  /* ------ layout ------ */
+  // ------ LAYOUT ------
   return (
     <main style={{ maxWidth: 760, margin: '28px auto', padding: 16 }}>
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 12,
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: 22 }}>
-          {isEditing ? 'Edit Recipe' : 'Add a Recipe'}
-        </h1>
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <h1 style={{ margin: 0, fontSize: 22 }}>{isEditing ? 'Edit Recipe' : 'Add a Recipe'}</h1>
       </header>
 
       {msg && (
-        <div
-          style={{
-            marginBottom: 12,
-            color: '#b42318',
-            background: '#fef2f2',
-            border: '1px solid #fee2e2',
-            padding: 10,
-            borderRadius: 10,
-          }}
-        >
+        <div style={{ marginBottom: 12, color: '#b42318', background: '#fef2f2', border: '1px solid #fee2e2', padding: 10, borderRadius: 10 }}>
           {msg}
         </div>
       )}
 
-      <section
-        style={{
-          background: '#fff',
-          border: '1px solid #eee',
-          borderRadius: 12,
-          padding: 14,
-          display: 'grid',
-          gap: 12,
-        }}
-      >
+      <section style={{ background: '#fff', border: '1px solid #eee', borderRadius: 12, padding: 14, display: 'grid', gap: 12 }}>
         {/* Photo */}
         <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Photo</label>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '110px 1fr',
-              gap: 10,
-              alignItems: 'center',
-            }}
-          >
-            <div
-              style={{
-                width: 110,
-                height: 110,
-                borderRadius: 10,
-                overflow: 'hidden',
-                border: '1px solid #e5e7eb',
-                background: '#f8fafc',
-                display: 'grid',
-                placeItems: 'center',
-                fontSize: 12,
-                textAlign: 'center',
-              }}
-            >
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 10, alignItems: 'center' }}>
+            <div style={{ width: 110, height: 110, borderRadius: 10, overflow: 'hidden', border: '1px solid #e5e7eb', background: '#f8fafc', display: 'grid', placeItems: 'center', fontSize: 12, textAlign: 'center' }}>
               {photoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  alt="Recipe"
-                  src={photoUrl}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : (
-                <span>No photo</span>
-              )}
+                <img alt="Recipe" src={photoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (<span>No photo</span>)}
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={onPickFile}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid #cbd5e1',
-                  padding: '8px 12px',
-                  borderRadius: 8,
-                }}
-              >
+              <button type="button" onClick={onPickFile} style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: 8 }}>
                 {photoUrl ? 'Change Photo' : 'Upload Photo'}
               </button>
               {photoUrl && (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => setShowCropper(true)}
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid #cbd5e1',
-                      padding: '8px 12px',
-                      borderRadius: 8,
-                    }}
-                  >
+                  <button type="button" onClick={() => setShowCropper(true)} style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: 8 }}>
                     Edit Crop
                   </button>
-                  <button
-                    type="button"
-                    onClick={removePhoto}
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid #ef4444',
-                      color: '#ef4444',
-                      padding: '8px 12px',
-                      borderRadius: 8,
-                    }}
-                  >
+                  <button type="button" onClick={removePhoto} style={{ background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', padding: '8px 12px', borderRadius: 8 }}>
                     Remove Photo
                   </button>
                 </>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={onFileChange}
-                style={{ display: 'none' }}
-              />
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={onFileChange} style={{ display: 'none' }} />
             </div>
           </div>
         </div>
@@ -906,23 +684,13 @@ function AddRecipeForm() {
         {/* Title */}
         <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Title</label>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g., Spicy Chicken Tacos"
-            style={fieldStyle}
-          />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Spicy Chicken Tacos" style={fieldStyle} />
         </div>
 
-        {/* Cuisine (kept; not shown elsewhere if empty) */}
+        {/* Cuisine */}
         <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Cuisine</label>
-          <input
-            value={cuisine}
-            onChange={(e) => setCuisine(e.target.value)}
-            placeholder="e.g., Mexican"
-            style={fieldStyle}
-          />
+          <input value={cuisine} onChange={(e) => setCuisine(e.target.value)} placeholder="e.g., Mexican" style={fieldStyle} />
         </div>
 
         {/* Recipe URL (optional) */}
@@ -930,12 +698,7 @@ function AddRecipeForm() {
           <label style={{ fontWeight: 600 }}>
             Recipe URL <span style={{ color: '#6b7280', fontWeight: 400 }}>(optional)</span>
           </label>
-          <input
-            value={sourceUrl}
-            onChange={(e) => setSourceUrl(e.target.value)}
-            placeholder="https://example.com"
-            style={fieldStyle}
-          />
+          <input value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://example.com" style={fieldStyle} />
         </div>
 
         {/* Recipe Type (multi-select chips) */}
@@ -962,78 +725,214 @@ function AddRecipeForm() {
           </div>
         </div>
 
-        {/* Components (Cake, Frosting, etc.) */}
-        <ComponentsEditor components={components} setComponents={setComponents} />
+        {/* ------------ SIMPLE MODE (default) ------------ */}
+        {!useComponents && (
+          <>
+            {/* Ingredients */}
+            <div style={{ display: 'grid', gap: 6 }}>
+              <label style={{ fontWeight: 600 }}>Ingredients</label>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {ingredients.map((val, idx) => (
+                  <input
+                    key={idx}
+                    value={val}
+                    onChange={(e) => {
+                      const copy = [...ingredients];
+                      copy[idx] = e.target.value;
+                      setIngredients(copy);
+                    }}
+                    placeholder={`Ingredient ${idx + 1}`}
+                    style={fieldStyle}
+                  />
+                ))}
+              </div>
+              <div>
+                <button type="button" onClick={() => setIngredients([...ingredients, ''])} style={{ background: 'transparent', border: '1px dashed #cbd5e1', padding: '8px 12px', borderRadius: 8 }}>
+                  + Add ingredient
+                </button>
+              </div>
+            </div>
 
-        {/* Visibility */}
-        <div style={{ display: 'grid', gap: 6 }}>
-          <label style={{ fontWeight: 600 }}>Visibility</label>
-          <select
-            value={visibility}
-            onChange={(e) => setVisibility(e.target.value as Visibility)}
-            style={fieldStyle}
-          >
-            <option value="private">Private (only you)</option>
-            <option value="friends">Friends (your friends)</option>
-            <option value="public">Public (everyone)</option>
-          </select>
-        </div>
+            {/* Instructions */}
+            <div style={{ display: 'grid', gap: 6 }}>
+              <label style={{ fontWeight: 600 }}>
+                Instructions <span style={{ color: '#6b7280', fontWeight: 400 }}>(one step per line)</span>
+              </label>
+              <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={7} placeholder={`1. Preheat oven...\n2. Mix dry ingredients...\n3. ...`} style={{ ...fieldStyle, resize: 'vertical', minHeight: 140 }} />
+            </div>
 
-        {/* Actions */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 10,
-            marginTop: 10,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => router.back()}
-            style={{
-              width: '100%',
-              background: 'transparent',
-              border: '1px solid #e5e7eb',
-              borderRadius: 8,
-              padding: '12px 14px',
-            }}
-          >
+            {/* Add Component CTA + info */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                onClick={enterComponentModeFromSimple}
+                style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: 8 }}
+              >
+                Add Component
+              </button>
+
+              <button
+                type="button"
+                aria-label="What are components?"
+                onClick={() => setShowInfo(v => !v)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', lineHeight: 0 }}
+                title="What are components?"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="8" />
+                  <path d="M10.5 12a1.5 1.5 0 1 1 3 0c0 1.5-1.5 1.5-1.5 3" />
+                </svg>
+              </button>
+
+              {showInfo && (
+                <div
+                  role="tooltip"
+                  style={{
+                    background: '#fff',
+                    border: '1px solid #e5e7eb',
+                    color: '#374151',
+                    borderRadius: 8,
+                    padding: '8px 10px',
+                    fontSize: 13,
+                  }}
+                >
+                  Use <b>components</b> for recipes with multiple parts (e.g., cake + frosting) where each part has its own ingredients and instructions.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* ------------ COMPONENT MODE (accordion) ------------ */}
+        {useComponents && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 600 }}>Components</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" onClick={addComponent} style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: 8 }}>
+                  + Add Component
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setUseComponents(false); setComponents([]); }}
+                  style={{ background: 'transparent', border: '1px solid #e5e7eb', padding: '8px 12px', borderRadius: 8 }}
+                  title="Return to simple ingredients & instructions"
+                >
+                  Use Simple Fields
+                </button>
+              </div>
+            </div>
+
+            {components.map((c, idx) => (
+              <div key={c.id} style={{ border: '1px solid #e5e7eb', borderRadius: 10 }}>
+                {/* Header row */}
+                <button
+                  type="button"
+                  onClick={() => toggleCollapsed(c.id)}
+                  aria-expanded={!c.collapsed}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    background: '#f8fafc',
+                    border: 'none',
+                    padding: '10px 12px',
+                    borderTopLeftRadius: 10,
+                    borderTopRightRadius: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>
+                    {c.title?.trim() || `Component ${idx + 1}`}
+                  </span>
+                  <span aria-hidden="true" style={{ transform: c.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform .15s ease' }}>▾</span>
+                </button>
+
+                {!c.collapsed && (
+                  <div style={{ padding: 12, display: 'grid', gap: 10 }}>
+                    {/* Title */}
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <label style={{ fontWeight: 600 }}>Component Title</label>
+                      <input
+                        value={c.title}
+                        onChange={(e) => updateComponentTitle(c.id, e.target.value)}
+                        placeholder={`e.g., Cake, Frosting`}
+                        style={fieldStyle}
+                      />
+                    </div>
+
+                    {/* Ingredients (per component) */}
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <label style={{ fontWeight: 600 }}>Ingredients</label>
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        {c.ingredients.map((val, i) => (
+                          <input
+                            key={i}
+                            value={val}
+                            onChange={(e) => updateComponentIngredients(c.id, i, e.target.value)}
+                            placeholder={`Ingredient ${i + 1}`}
+                            style={fieldStyle}
+                          />
+                        ))}
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => addComponentIngredientRow(c.id)}
+                          style={{ background: 'transparent', border: '1px dashed #cbd5e1', padding: '8px 12px', borderRadius: 8 }}
+                        >
+                          + Add ingredient
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Instructions (per component) */}
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <label style={{ fontWeight: 600 }}>
+                        Instructions <span style={{ color: '#6b7280', fontWeight: 400 }}>(one step per line)</span>
+                      </label>
+                      <textarea
+                        value={c.instructions}
+                        onChange={(e) => updateComponentInstructions(c.id, e.target.value)}
+                        rows={6}
+                        placeholder={`1. ...\n2. ...`}
+                        style={{ ...fieldStyle, resize: 'vertical', minHeight: 120 }}
+                      />
+                    </div>
+
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => deleteComponent(c.id)}
+                        style={{ background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', padding: '8px 12px', borderRadius: 8 }}
+                      >
+                        Delete Component
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Action buttons inside the card */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+          <button type="button" onClick={() => router.back()} style={{ width: '100%', background: 'transparent', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 14px' }}>
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={busy}
-            style={{
-              width: '100%',
-              background: '#111827',
-              color: 'white',
-              border: 'none',
-              borderRadius: 8,
-              padding: '12px 14px',
-              opacity: busy ? 0.7 : 1,
-            }}
-          >
+          <button type="button" onClick={submit} disabled={busy} style={{ width: '100%', background: '#111827', color: 'white', border: 'none', borderRadius: 8, padding: '12px 14px', opacity: busy ? 0.7 : 1 }}>
             {busy ? 'Saving…' : isEditing ? 'Save Changes' : 'Save Recipe'}
           </button>
         </div>
 
-        {/* Danger: Delete (edit mode) */}
+        {/* Danger: Delete (only in edit mode) */}
         {isEditing && (
           <div style={{ marginTop: 4 }}>
-            <button
-              type="button"
-              onClick={deleteRecipe}
-              style={{
-                width: '100%',
-                background: 'transparent',
-                border: '1px solid #ef4444',
-                color: '#ef4444',
-                borderRadius: 8,
-                padding: '12px 14px',
-              }}
-            >
+            <button type="button" onClick={deleteRecipe} style={{ width: '100%', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: 8, padding: '12px 14px' }}>
               Delete Recipe
             </button>
           </div>
@@ -1042,39 +941,9 @@ function AddRecipeForm() {
 
       {/* Cropper modal */}
       {showCropper && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 50,
-            padding: 16,
-          }}
-        >
-          <div
-            style={{
-              width: 'min(92vw, 520px)',
-              background: '#fff',
-              borderRadius: 12,
-              overflow: 'hidden',
-              border: '1px solid #e5e7eb',
-              display: 'grid',
-              gridTemplateRows: 'auto 1fr auto',
-            }}
-          >
-            <div
-              style={{
-                padding: 12,
-                borderBottom: '1px solid #f1f5f9',
-                fontWeight: 600,
-              }}
-            >
-              Adjust Photo
-            </div>
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'grid', placeItems: 'center', zIndex: 50, padding: 16 }}>
+          <div style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 12, overflow: 'hidden', border: '1px solid #e5e7eb', display: 'grid', gridTemplateRows: 'auto 1fr auto' }}>
+            <div style={{ padding: 12, borderBottom: '1px solid #f1f5f9', fontWeight: 600 }}>Adjust Photo</div>
             <div style={{ position: 'relative', height: 360 }}>
               {localPhotoSrc && (
                 <Cropper
@@ -1093,44 +962,11 @@ function AddRecipeForm() {
             </div>
             <div style={{ padding: 12, borderTop: '1px solid #f1f5f9' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <input
-                  type="range"
-                  min={1}
-                  max={3}
-                  step={0.01}
-                  value={zoom}
-                  onChange={(e) => setZoom(parseFloat(e.target.value))}
-                  style={{ gridColumn: '1 / -1', width: '100%' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc);
-                    setLocalPhotoSrc(null);
-                    setShowCropper(false);
-                  }}
-                  style={{
-                    width: '100%',
-                    background: 'transparent',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 8,
-                    padding: '10px 12px',
-                  }}
-                >
+                <input type="range" min={1} max={3} step={0.01} value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} style={{ gridColumn: '1 / -1', width: '100%' }} />
+                <button type="button" onClick={() => { if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc); setLocalPhotoSrc(null); setShowCropper(false); }} style={{ width: '100%', background: 'transparent', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px' }}>
                   Cancel
                 </button>
-                <button
-                  type="button"
-                  onClick={confirmCrop}
-                  style={{
-                    width: '100%',
-                    background: '#111827',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 8,
-                    padding: '10px 12px',
-                  }}
-                >
+                <button type="button" onClick={confirmCrop} style={{ width: '100%', background: '#111827', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 12px' }}>
                   Save
                 </button>
               </div>
