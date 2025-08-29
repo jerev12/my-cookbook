@@ -42,7 +42,6 @@ function formatMonthDayYearWithComma(d: Date) {
   return `${month}, ${day}, ${year}`;
 }
 
-// Keep in sync with footer visual height
 const FOOTER_HEIGHT_PX = 56;
 
 export default function RecipeModal({
@@ -54,31 +53,26 @@ export default function RecipeModal({
   onClose: () => void;
   recipe: Recipe | null;
 }) {
-  // detail data
   const [steps, setSteps] = useState<Step[]>([]);
   const [ings, setIngs] = useState<Ingredient[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // author
   const [author, setAuthor] = useState<Profile | null>(null);
 
-  // viewer & ownership
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const isOwner = useMemo(
     () => !!(currentUserId && recipe?.user_id && currentUserId === recipe.user_id),
     [currentUserId, recipe?.user_id]
   );
 
-  // hearts / bookmarks
   const [heartCount, setHeartCount] = useState<number>(0);
   const [didHeart, setDidHeart] = useState<boolean>(false);
   const [busyHeart, setBusyHeart] = useState<boolean>(false);
 
   const [didSave, setDidSave] = useState<boolean>(false);
   const [busySave, setBusySave] = useState<boolean>(false);
-  const [bookmarkCount, setBookmarkCount] = useState<number>(0); // owner only
+  const [bookmarkCount, setBookmarkCount] = useState<number>(0);
 
-  // added on text
   const addedText = useMemo(() => {
     if (!recipe?.created_at) return null;
     const created = new Date(recipe.created_at);
@@ -88,17 +82,15 @@ export default function RecipeModal({
       : `Added on ${formatMonthDayYearWithComma(created)}`;
   }, [recipe?.created_at]);
 
-  // Lock body scroll while modal is open
+  // Lock page scroll while modal is open
   useEffect(() => {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => (document.body.style.overflow = prevOverflow);
   }, [open]);
 
-  // Load details & meta on open
+  // Load details
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -106,13 +98,11 @@ export default function RecipeModal({
 
       setLoading(true);
 
-      // viewer
       const { data: authData } = await supabase.auth.getUser();
       const uid = authData?.user?.id ?? null;
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // author
       const { data: profs } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url')
@@ -121,7 +111,6 @@ export default function RecipeModal({
       if (!mounted) return;
       setAuthor((profs?.[0] as Profile) ?? null);
 
-      // ingredients & steps
       const [{ data: stepData }, { data: ingData }] = await Promise.all([
         supabase
           .from('recipe_steps')
@@ -137,7 +126,6 @@ export default function RecipeModal({
       setSteps((stepData as Step[]) || []);
       setIngs((ingData as Ingredient[]) || []);
 
-      // hearts total
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
@@ -146,7 +134,6 @@ export default function RecipeModal({
       setHeartCount((heartRows ?? []).length);
 
       if (uid) {
-        // your heart/save
         const [{ data: myHeart }, { data: mySave }] = await Promise.all([
           supabase
             .from('recipe_hearts')
@@ -165,7 +152,6 @@ export default function RecipeModal({
         setDidHeart(!!myHeart?.length);
         setDidSave(!!mySave?.length);
 
-        // owner bookmark count
         if (recipe.user_id === uid) {
           const { data: bmRows } = await supabase
             .from('recipe_bookmarks')
@@ -260,7 +246,7 @@ export default function RecipeModal({
         alignItems: 'center',
         justifyContent: 'center',
         padding: 12,
-        zIndex: 1000, // above bottom tabs
+        zIndex: 1000,
       }}
       onClick={onClose}
       aria-modal="true"
@@ -275,11 +261,11 @@ export default function RecipeModal({
           display: 'flex',
           flexDirection: 'column',
           maxHeight: '90vh',
-          overflow: 'hidden', // header/footer fixed; content scrolls
+          overflow: 'hidden',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* FIXED HEADER: avatar/name + edit + close */}
+        {/* FIXED HEADER */}
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
           <div
             style={{
@@ -386,18 +372,15 @@ export default function RecipeModal({
           </div>
         </div>
 
-        {/* SCROLLABLE AREA: image + title/cuisine + body */}
+        {/* SCROLLABLE: image edge-to-edge, then padded content */}
         <div
           style={{
-            padding: 16,
             overflowY: 'auto',
             flex: '1 1 auto',
-            // keep last content above footer + safe area
-            paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + 16px + env(safe-area-inset-bottom))`,
             WebkitOverflowScrolling: 'touch',
           }}
         >
-          {/* Image (preserve user's crop; full modal width) */}
+          {/* Full-width image (no padding) */}
           {recipe.photo_url ? (
             <img
               src={recipe.photo_url}
@@ -407,66 +390,74 @@ export default function RecipeModal({
                 height: 'auto',
                 display: 'block',
                 border: 0,
-                marginBottom: 12,
               }}
             />
           ) : null}
 
-          {/* Title + cuisine */}
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
-            <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
+          {/* Padded wrapper for the rest of the content */}
+          <div
+            style={{
+              padding: 16,
+              // keep last content above the fixed footer + safe area
+              paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + 16px + env(safe-area-inset-bottom))`,
+            }}
+          >
+            {/* Title + cuisine */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
+              <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
+            </div>
+
+            <section>
+              <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
+              {loading ? (
+                <div>Loading…</div>
+              ) : (
+                <ul style={{ paddingLeft: 16 }}>
+                  {ings.length ? (
+                    ings.map((i, idx) => {
+                      const qty = i.quantity ?? '';
+                      const parts = [qty, i.unit, i.item_name].filter(Boolean).join(' ');
+                      return (
+                        <li key={idx}>
+                          {parts}
+                          {i.note ? ` (${i.note})` : ''}
+                        </li>
+                      );
+                    })
+                  ) : (
+                    <li>No ingredients yet.</li>
+                  )}
+                </ul>
+              )}
+            </section>
+
+            <section>
+              <h3 style={{ margin: '8px 0' }}>Instructions</h3>
+              {loading ? (
+                <div>Loading…</div>
+              ) : (
+                <ol style={{ paddingLeft: 18 }}>
+                  {steps.length ? (
+                    steps.map((s, idx) => <li key={idx}>{s.body}</li>)
+                  ) : (
+                    <li>This recipe has no steps yet.</li>
+                  )}
+                </ol>
+              )}
+            </section>
+
+            {recipe.source_url ? (
+              <a
+                href={recipe.source_url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: '#0b5' }}
+              >
+                Open Source
+              </a>
+            ) : null}
           </div>
-
-          <section>
-            <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
-            {loading ? (
-              <div>Loading…</div>
-            ) : (
-              <ul style={{ paddingLeft: 16 }}>
-                {ings.length ? (
-                  ings.map((i, idx) => {
-                    const qty = i.quantity ?? '';
-                    const parts = [qty, i.unit, i.item_name].filter(Boolean).join(' ');
-                    return (
-                      <li key={idx}>
-                        {parts}
-                        {i.note ? ` (${i.note})` : ''}
-                      </li>
-                    );
-                  })
-                ) : (
-                  <li>No ingredients yet.</li>
-                )}
-              </ul>
-            )}
-          </section>
-
-          <section>
-            <h3 style={{ margin: '8px 0' }}>Instructions</h3>
-            {loading ? (
-              <div>Loading…</div>
-            ) : (
-              <ol style={{ paddingLeft: 18 }}>
-                {steps.length ? (
-                  steps.map((s, idx) => <li key={idx}>{s.body}</li>)
-                ) : (
-                  <li>This recipe has no steps yet.</li>
-                )}
-              </ol>
-            )}
-          </section>
-
-          {recipe.source_url ? (
-            <a
-              href={recipe.source_url}
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: '#0b5' }}
-            >
-              Open Source
-            </a>
-          ) : null}
         </div>
 
         {/* FIXED FOOTER */}
