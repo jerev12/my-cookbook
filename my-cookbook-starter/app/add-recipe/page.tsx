@@ -228,6 +228,7 @@ function AddRecipeForm() {
       const { data: pub } = supabase.storage.from('recipe-photos').getPublicUrl(newPath);
       const newPublicUrl = pub.publicUrl;
 
+      // If editing, persist the new photo URL immediately
       if (isEditing && editId) {
         const { error: upErr } = await supabase
           .from('recipes')
@@ -331,64 +332,61 @@ function AddRecipeForm() {
 
     setBusy(true);
 
-    const steps = instructions.split('\n').map((s) => s.trim()).filter(Boolean).map((body, i) => ({ step_number: i + 1, body }));
-    const ingArray: IngredientRow[] = ingredients.map((i) => i.trim()).filter(Boolean).map((item_name) => ({ item_name }));
+    // Build steps & ingredients
+    const steps = instructions
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((body, i) => ({ step_number: i + 1, body }));
+
+    const ingArray: IngredientRow[] = ingredients
+      .map((i) => i.trim())
+      .filter(Boolean)
+      .map((item_name) => ({ item_name }));
 
     try {
       if (isEditing && editId) {
-        const { error: upErr } = await supabase
-          .from('recipes')
-          .update({
-            title,
-            cuisine: cuisine || null,
-            source_url: sourceUrl || null,
-            visibility,
-            photo_url: photoUrl || null,
-            recipe_types: recipeTypes, // NEW: save
-          })
-          .eq('id', editId)
-          .eq('user_id', userId);
+        // --- EDIT: single transactional RPC (updates row + replaces ingredients/steps) ---
+        const { error: upErr } = await supabase.rpc('update_full_recipe', {
+          p_recipe_id: editId,
+          p_title: title,
+          p_cuisine: cuisine || null,
+          p_photo_url: photoUrl || null,
+          p_source_url: sourceUrl || null,
+          p_instructions: instructions,
+          p_ingredients: ingArray,        // [{ item_name, quantity?, unit?, note? }]
+          p_steps: steps,                  // [{ step_number, body }]
+          p_visibility: visibility,        // enum labels: 'private' | 'friends' | 'public'
+          p_recipe_types: recipeTypes || [], // text[]
+        });
         if (upErr) throw upErr;
-
-        const [{ error: d1 }, { error: d2 }] = await Promise.all([
-          supabase.from('recipe_ingredients').delete().eq('recipe_id', editId),
-          supabase.from('recipe_steps').delete().eq('recipe_id', editId),
-        ]);
-        if (d1 || d2) throw d1 || d2;
-
-        if (ingArray.length) {
-          const { error: insIngErr } = await supabase
-            .from('recipe_ingredients')
-            .insert(ingArray.map((row) => ({ ...row, recipe_id: editId })));
-          if (insIngErr) throw insIngErr;
-        }
-        if (steps.length) {
-          const { error: insStepErr } = await supabase
-            .from('recipe_steps')
-            .insert(steps.map((s) => ({ ...s, recipe_id: editId })));
-          if (insStepErr) throw insStepErr;
-        }
 
         router.replace('/cookbook');
         return;
       }
 
-      // CREATE via RPC (includes photo_url & recipe_types)
+      // --- CREATE: single transactional RPC (inserts row + ingredients/steps) ---
       const { error } = await supabase.rpc('add_full_recipe', {
         p_title: title,
         p_cuisine: cuisine || null,
         p_photo_url: photoUrl || null,
         p_source_url: sourceUrl || null,
         p_instructions: instructions,
-        p_ingredients: ingArray,
-        p_steps: steps,
-        p_visibility: visibility,
-        p_recipe_types: recipeTypes, // NEW
+        p_ingredients: ingArray,          // [{ item_name, quantity?, unit?, note? }]
+        p_steps: steps,                    // [{ step_number, body }]
+        p_visibility: visibility,          // enum labels
+        p_recipe_types: recipeTypes || [], // text[]
       });
       if (error) throw error;
 
-      setTitle(''); setCuisine(''); setSourceUrl(''); setInstructions('');
-      setIngredients(['']); setVisibility('private'); setPhotoUrl(null);
+      // Reset + go back
+      setTitle('');
+      setCuisine('');
+      setSourceUrl('');
+      setInstructions('');
+      setIngredients(['']);
+      setVisibility('private');
+      setPhotoUrl(null);
       setRecipeTypes([]);
       oldPhotoPathRef.current = null;
 
