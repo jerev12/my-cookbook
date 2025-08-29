@@ -401,7 +401,7 @@ export default function RecipeModal({
             style={{
               padding: 16,
               // keep last content above the fixed footer + safe area
-              paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + 4px + env(safe-area-inset-bottom))`,
+              paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + env(safe-area-inset-bottom))`,
             }}
           >
             {/* Title + cuisine */}
@@ -465,8 +465,8 @@ export default function RecipeModal({
         {/* FIXED FOOTER */}
         <div
           style={{
-            padding: '10px 16px',
-            paddingBottom: 'calc(10px + env(safe-area-inset-bottom))',
+            padding: '6px 16px',
+            paddingBottom: 'calc(6px + env(safe-area-inset-bottom))',
             borderTop: '1px solid #eee',
             display: 'flex',
             alignItems: 'center',
