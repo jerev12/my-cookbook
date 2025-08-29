@@ -7,14 +7,14 @@ import AuthGuard from '../components/AuthGuard';
 import FriendsListModal from '../components/FriendsListModal';
 import ProfileSection from '../components/ProfileSection';
 import RecipeModal from '../components/RecipeModal';
-import RecipeBadges from '../components/RecipeBadges';
+import { RecipeTile, recipeGridStyle } from '../components/RecipeBadges';
 
 type Recipe = {
   id: string;
   user_id: string;                // for modal ownership/bookmarks
   title: string;
-  cuisine: string | null;         // still in DB but not displayed
-  recipe_types: string[] | null;  // <-- NEW: what we display
+  cuisine: string | null;         // kept in DB, not displayed
+  recipe_types: string[] | null;  // displayed on overlay
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;      // for “Added on …”
@@ -203,7 +203,7 @@ export default function CookbookPage() {
             <div
               style={{
                 background: '#fff',
-                border: '1px solid #eee',
+                border: '1px solid '#eee',
                 borderRadius: 12,
                 padding: 16,
                 color: '#606375',
@@ -212,47 +212,15 @@ export default function CookbookPage() {
               You haven’t added any recipes yet. Tap “+ Add Recipe” to create your first one.
             </div>
           ) : (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
-                gap: 12,
-              }}
-            >
+            <div style={recipeGridStyle}>
               {recipes.map((r) => (
-                <button
+                <RecipeTile
                   key={r.id}
+                  title={r.title}
+                  types={r.recipe_types ?? []}
+                  photoUrl={r.photo_url}
                   onClick={() => openRecipe(r)}
-                  style={{
-                    border: '1px solid #eee',
-                    borderRadius: 12,
-                    padding: 10,
-                    background: '#fff',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                  }}
-                  aria-label={`Open ${r.title}`}
-                >
-                  {r.photo_url ? (
-                    <img
-                      src={r.photo_url}
-                      alt={r.title}
-                      style={{
-                        width: '100%',
-                        aspectRatio: '4/3',
-                        objectFit: 'cover',
-                        borderRadius: 8,
-                      }}
-                    />
-                  ) : null}
-                  <div style={{ fontWeight: 600, marginTop: 6, fontSize: 14 }}>
-                    {r.title}
-                  </div>
-                  {/* Recipe Type badges (no cuisine fallback) */}
-                  <div style={{ marginTop: 4 }}>
-                    <RecipeBadges types={r.recipe_types ?? []} />
-                  </div>
-                </button>
+                />
               ))}
             </div>
           )}
