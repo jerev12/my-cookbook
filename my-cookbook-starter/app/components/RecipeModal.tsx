@@ -275,18 +275,17 @@ export default function RecipeModal({
           display: 'flex',
           flexDirection: 'column',
           maxHeight: '90vh',
-          overflow: 'hidden', // header/footer fixed, content scrolls
+          overflow: 'hidden', // header/footer fixed; content scrolls
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header (author + edit + close) */}
+        {/* FIXED HEADER: avatar/name + edit + close */}
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
           <div
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              marginBottom: 0,
               gap: 12,
             }}
           >
@@ -387,36 +386,38 @@ export default function RecipeModal({
           </div>
         </div>
 
-        {/* Image (full width; preserve the user's exact crop) */}
-        {recipe.photo_url ? (
-          <img
-            src={recipe.photo_url}
-            alt={recipe.title}
-            style={{
-              width: '100%',
-              height: 'auto', // keep original crop/aspect
-              display: 'block',
-              borderBottom: '1px solid #eee',
-            }}
-          />
-        ) : null}
-
-        {/* Title + cuisine (moved below image) */}
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
-          <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
-        </div>
-
-        {/* Scrollable content with safe-area & footer-aware padding */}
+        {/* SCROLLABLE AREA: image + title/cuisine + body */}
         <div
           style={{
             padding: 16,
             overflowY: 'auto',
             flex: '1 1 auto',
+            // keep last content above footer + safe area
             paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + 16px + env(safe-area-inset-bottom))`,
             WebkitOverflowScrolling: 'touch',
           }}
         >
+          {/* Image (preserve user's crop; full modal width) */}
+          {recipe.photo_url ? (
+            <img
+              src={recipe.photo_url}
+              alt={recipe.title}
+              style={{
+                width: '100%',
+                height: 'auto',
+                display: 'block',
+                border: 0,
+                marginBottom: 12,
+              }}
+            />
+          ) : null}
+
+          {/* Title + cuisine */}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
+            <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
+          </div>
+
           <section>
             <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
             {loading ? (
@@ -468,7 +469,7 @@ export default function RecipeModal({
           ) : null}
         </div>
 
-        {/* Fixed footer (safe-area aware) */}
+        {/* FIXED FOOTER */}
         <div
           style={{
             padding: '10px 16px',
