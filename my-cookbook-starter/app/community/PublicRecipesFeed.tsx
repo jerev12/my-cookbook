@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '@/app/components/RecipeModal';
+import RecipeBadges from '@/components/RecipeBadges';
 
 type Recipe = {
   id: string;
   user_id: string;
   title: string;
-  cuisine: string | null;
+  cuisine: string | null;           // still in DB, but not displayed
+  recipe_types: string[] | null;    // <-- NEW: displayed as badges
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
@@ -32,7 +34,7 @@ export default function PublicRecipesFeed() {
 
       const { data, error } = await supabase
         .from('recipes')
-        .select('id,user_id,title,cuisine,photo_url,source_url,created_at,visibility')
+        .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility')
         .eq('visibility', 'public')
         .order('created_at', { ascending: false });
 
@@ -102,6 +104,7 @@ export default function PublicRecipesFeed() {
                 textAlign: 'left',
                 cursor: 'pointer',
               }}
+              aria-label={`Open ${r.title}`}
             >
               {r.photo_url ? (
                 <img
@@ -118,8 +121,9 @@ export default function PublicRecipesFeed() {
               <div style={{ fontWeight: 600, marginTop: 6, fontSize: 14 }}>
                 {r.title}
               </div>
-              <div style={{ color: '#666', fontSize: 12 }}>
-                {r.cuisine || '—'}
+              {/* Recipe Type badges (no cuisine fallback) */}
+              <div style={{ marginTop: 4 }}>
+                <RecipeBadges types={r.recipe_types ?? []} />
               </div>
             </button>
           ))}
