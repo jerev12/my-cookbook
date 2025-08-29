@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
-// ⬇️ Update this path if your modal sits elsewhere
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
 
 type TabKey = 'recipes' | 'users';
@@ -35,32 +34,26 @@ const PAGE_SIZE = 20;
 export default function CommunitySearch() {
   const [tab, setTab] = useState<TabKey>('recipes');
 
-  // search + filters
   const [q, setQ] = useState('');
   const debouncedQ = useDebounce(q, 300);
-  const queryActive = debouncedQ.trim().length > 0; // only search after typing
+  const queryActive = debouncedQ.trim().length > 0;
 
-  // paging
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
 
-  // data
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<Profile[]>([]);
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  // me / friendships
   const [myId, setMyId] = useState<string | null>(null);
   const [friendStatus, setFriendStatus] = useState<Record<string, FriendRelation>>({});
 
-  // modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalRecipe, setModalRecipe] = useState<any>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
-  // current user id
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -68,12 +61,10 @@ export default function CommunitySearch() {
     })();
   }, []);
 
-  // reset page when inputs change
   useEffect(() => {
     setPage(0);
   }, [tab, debouncedQ]);
 
-  // fetch when deps change (but only after user typed something)
   useEffect(() => {
     if (!queryActive) {
       setUsers([]);
@@ -108,7 +99,6 @@ export default function CommunitySearch() {
         setUsers(rows);
         setHasMore(rows.length === PAGE_SIZE);
 
-        // friendship statuses
         if (rows.length > 0) {
           const ids = rows.map(u => u.id);
           const { data: statuses, error: sErr } = await supabase.rpc('get_friend_statuses', {
@@ -131,11 +121,12 @@ export default function CommunitySearch() {
           q: debouncedQ || null,
           limit_count: PAGE_SIZE,
           offset_count: page * PAGE_SIZE,
-          cuisine_filter: null, // removed cuisine dropdown per request
+          cuisine_filter: null,
         });
         if (error) throw error;
 
-        const rows = (data as RecipeRow[]) ?? [];
+        let rows = (data as RecipeRow[]) ?? [];
+        rows = await backfillPhotos(rows); // add photo_url values
         setRecipes(rows);
         setHasMore(rows.length === PAGE_SIZE);
         setUsers([]);
@@ -149,7 +140,28 @@ export default function CommunitySearch() {
     }
   }
 
-  // open modal with a fetched recipe object
+  async function backfillPhotos(rows: RecipeRow[]): Promise<RecipeRow[]> {
+    if (!rows.length) return rows;
+    const ids = rows.map(r => r.id);
+
+    const { data, error } = await supabase
+      .from('recipes')
+      .select('id, photo_url')
+      .in('id', ids);
+
+    if (error || !data) return rows;
+
+    const photoMap = new Map<string, string | null>();
+    data.forEach((r: { id: string; photo_url: string | null }) => {
+      photoMap.set(r.id, r.photo_url ?? null);
+    });
+
+    return rows.map(r => ({
+      ...r,
+      photo_url: r.photo_url ?? photoMap.get(r.id) ?? null,
+    }));
+  }
+
   async function openRecipe(rid: string) {
     try {
       setModalOpen(true);
@@ -170,10 +182,8 @@ export default function CommunitySearch() {
     }
   }
 
-  // friend actions
   async function handleToggleRequest(targetId: string, relation: FriendRelation) {
     try {
-      // Optimistic UI first
       setFriendStatus(prev => ({
         ...prev,
         [targetId]: relation === 'none' ? 'pending_outgoing' : 'none',
@@ -183,7 +193,7 @@ export default function CommunitySearch() {
         const { error } = await supabase.rpc('request_friend', { target_id: targetId });
         if (error) throw error;
       } else if (relation === 'pending_outgoing') {
-        const { error } = await supabase.rpc('unfriend', { target_id: targetId }); // cancel
+        const { error } = await supabase.rpc('unfriend', { target_id: targetId });
         if (error) throw error;
       } else {
         return;
@@ -192,7 +202,7 @@ export default function CommunitySearch() {
       await refreshStatus([targetId]);
     } catch (e: any) {
       console.error(e);
-      setFriendStatus(prev => ({ ...prev, [targetId]: relation })); // revert
+      setFriendStatus(prev => ({ ...prev, [targetId]: relation }));
       alert(e?.message ?? 'Failed to update friend request.');
     }
   }
@@ -219,7 +229,6 @@ export default function CommunitySearch() {
     });
   }
 
-  // ------- STYLES (inline, typed with CSSProperties) -------
   const S = {
     container: {
       width: '100%',
@@ -260,7 +269,6 @@ export default function CommunitySearch() {
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
 
-    // My Cookbook card match
     cardList: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
@@ -287,15 +295,11 @@ export default function CommunitySearch() {
       width: '100%',
       aspectRatio: '4 / 3',
       borderRadius: 8,
-      background:
-        'linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 37%, #f3f4f6 63%)',
-      backgroundSize: '400% 100%',
-      animation: 'shimmer 1.4s ease infinite',
+      background: '#f3f4f6',
     } as CSSProperties,
     rTitle: { fontWeight: 600, marginTop: 6, fontSize: 14 } as CSSProperties,
     rCuisine: { color: '#666', fontSize: 12 } as CSSProperties,
 
-    // Users list
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -310,13 +314,13 @@ export default function CommunitySearch() {
       alignItems: 'center',
       gap: 8,
       minWidth: 0,
-      textDecoration: 'none',     // <-- remove link look
-      color: '#111827',           // <-- neutral dark
+      textDecoration: 'none',
+      color: '#111827',
     } as CSSProperties,
     avatar: { width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
     name: {
       fontSize: 14,
-      fontWeight: 600,            // <-- more “official”
+      fontWeight: 600,
       whiteSpace: 'nowrap',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -356,7 +360,6 @@ export default function CommunitySearch() {
     <div style={S.container}>
       <h1 style={S.h1}>Community</h1>
 
-      {/* Segmented tabs above search */}
       <div role="tablist" aria-label="Search type" style={S.pillsWrap}>
         <button
           role="tab"
@@ -376,7 +379,6 @@ export default function CommunitySearch() {
         </button>
       </div>
 
-      {/* Search row */}
       <div style={S.row}>
         <input
           style={S.input}
@@ -384,10 +386,8 @@ export default function CommunitySearch() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        {/* Cuisine dropdown removed as requested */}
       </div>
 
-      {/* If no query yet, show a gentle prompt and stop here */}
       {!queryActive ? (
         <div style={S.hint}>
           Start typing above to search {tab === 'users' ? 'for people' : 'for recipes'}.
@@ -397,7 +397,6 @@ export default function CommunitySearch() {
           {loading && <div style={S.hint}>Searching…</div>}
           {!loading && errMsg && <div style={S.error}>{errMsg}</div>}
 
-          {/* Users list */}
           {!loading && !errMsg && tab === 'users' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 ? (
@@ -410,7 +409,6 @@ export default function CommunitySearch() {
                   let actionEl: JSX.Element = <span style={S.hint}>You</span>;
                   if (!isMe) {
                     if (relation === 'none' || relation === 'pending_outgoing') {
-                      // toggle: add / cancel
                       actionEl = (
                         <button
                           style={{
@@ -426,14 +424,12 @@ export default function CommunitySearch() {
                         </button>
                       );
                     } else if (relation === 'pending_incoming') {
-                      // read-only here
                       actionEl = (
                         <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
                           Requested
                         </button>
                       );
                     } else {
-                      // friends → unfriend
                       actionEl = (
                         <button
                           style={{ ...S.btn, cursor: 'pointer' }}
@@ -449,7 +445,6 @@ export default function CommunitySearch() {
                   return (
                     <div key={p.id} style={S.userRow}>
                       <Link href={`/profiles/${p.id}`} style={S.userLeftLink}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={p.avatar_url ?? '/avatar-placeholder.png'}
                           alt={p.display_name ?? 'user'}
@@ -467,7 +462,6 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Recipes grid — matches My Cookbook */}
           {!loading && !errMsg && tab === 'recipes' && (
             <div style={S.cardList}>
               {recipes.length === 0 ? (
@@ -480,9 +474,7 @@ export default function CommunitySearch() {
                     style={S.cardButton}
                     aria-label={`Open ${r.title}`}
                   >
-                    {/* Photo / placeholder to guarantee layout */}
                     {r.photo_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
                       <img src={r.photo_url} alt={r.title} style={S.image} />
                     ) : (
                       <div style={S.placeholder} />
@@ -495,7 +487,6 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Pager */}
           {!loading && (users.length > 0 || recipes.length > 0) && (
             <div style={S.pager}>
               <button
@@ -518,7 +509,6 @@ export default function CommunitySearch() {
         </>
       )}
 
-      {/* Recipe Modal */}
       {modalOpen && (
         <RecipeModal
           open={modalOpen}
