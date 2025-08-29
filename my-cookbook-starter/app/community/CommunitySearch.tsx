@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeBadges from '@/components/RecipeBadges';
+import RecipeBadges from '../components/RecipeBadges';
 
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
 
