@@ -30,7 +30,6 @@ export default function PublicRecipesFeed() {
       setLoading(true);
       setMsg(null);
 
-      // pull public recipes only
       const { data, error } = await supabase
         .from('recipes')
         .select('id,user_id,title,cuisine,photo_url,source_url,created_at,visibility')
@@ -61,73 +60,74 @@ export default function PublicRecipesFeed() {
     setSelected(null);
   }
 
-  if (loading) {
-    return <div>Loading public recipes…</div>;
-  }
-
-  if (msg) {
-    return <div style={{ color: '#b42318' }}>{msg}</div>;
-  }
-
-  if (!rows.length) {
-    return (
-      <div
-        style={{
-          background: '#fff',
-          border: '1px solid #eee',
-          borderRadius: 12,
-          padding: 16,
-          color: '#606375',
-        }}
-      >
-        No public recipes yet.
-      </div>
-    );
-  }
-
-  // — same card/grid look as My Cookbook —
   return (
-    <>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
-          gap: 12,
-        }}
-      >
-        {rows.map((r) => (
-          <button
-            key={r.id}
-            onClick={() => openRecipe(r)}
-            style={{
-              border: '1px solid #eee',
-              borderRadius: 12,
-              padding: 10,
-              background: '#fff',
-              textAlign: 'left',
-              cursor: 'pointer',
-            }}
-          >
-            {r.photo_url ? (
-              <img
-                src={r.photo_url}
-                alt={r.title}
-                style={{
-                  width: '100%',
-                  aspectRatio: '4/3',
-                  objectFit: 'cover',
-                  borderRadius: 8,
-                }}
-              />
-            ) : null}
-            <div style={{ fontWeight: 600, marginTop: 6, fontSize: 14 }}>{r.title}</div>
-            <div style={{ color: '#666', fontSize: 12 }}>{r.cuisine || '—'}</div>
-          </button>
-        ))}
-      </div>
+    <main style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
+      <h1 style={{ margin: 0, fontSize: 22, marginBottom: 12 }}>
+        Community — Public Recipes
+      </h1>
 
-      {/* Shared modal (same one used on My Cookbook) */}
+      {loading ? (
+        <div>Loading public recipes…</div>
+      ) : msg ? (
+        <div style={{ color: '#b42318' }}>{msg}</div>
+      ) : !rows.length ? (
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #eee',
+            borderRadius: 12,
+            padding: 16,
+            color: '#606375',
+          }}
+        >
+          No public recipes yet.
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
+            gap: 12,
+          }}
+        >
+          {rows.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => openRecipe(r)}
+              style={{
+                border: '1px solid #eee',
+                borderRadius: 12,
+                padding: 10,
+                background: '#fff',
+                textAlign: 'left',
+                cursor: 'pointer',
+              }}
+            >
+              {r.photo_url ? (
+                <img
+                  src={r.photo_url}
+                  alt={r.title}
+                  style={{
+                    width: '100%',
+                    aspectRatio: '4/3',
+                    objectFit: 'cover',
+                    borderRadius: 8,
+                  }}
+                />
+              ) : null}
+              <div style={{ fontWeight: 600, marginTop: 6, fontSize: 14 }}>
+                {r.title}
+              </div>
+              <div style={{ color: '#666', fontSize: 12 }}>
+                {r.cuisine || '—'}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Shared modal */}
       <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
-    </>
+    </main>
   );
 }
