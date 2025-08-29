@@ -11,7 +11,7 @@ type Recipe = {
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
-  instructions?: string | null; // NEW: used to infer component order
+  instructions?: string | null; // used to infer component order
 };
 
 type StepRow = { step_number: number; body: string; section_label: string | null };
@@ -45,7 +45,6 @@ function formatMonthDayYearWithComma(d: Date) {
   return `${month}, ${day}, ${year}`;
 }
 
-// smaller footer height
 const FOOTER_HEIGHT_PX = 44;
 
 export default function RecipeModal({
@@ -62,22 +61,21 @@ export default function RecipeModal({
   const [loading, setLoading] = useState(false);
 
   const [author, setAuthor] = useState<Profile | null>(null);
-
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [fullRecipe, setFullRecipe] = useState<Recipe | null>(recipe);
+
   const isOwner = useMemo(
     () => !!(currentUserId && recipe?.user_id && currentUserId === recipe.user_id),
     [currentUserId, recipe?.user_id]
   );
 
+  // hearts/bookmarks
   const [heartCount, setHeartCount] = useState<number>(0);
   const [didHeart, setDidHeart] = useState<boolean>(false);
   const [busyHeart, setBusyHeart] = useState<boolean>(false);
-
   const [didSave, setDidSave] = useState<boolean>(false);
   const [busySave, setBusySave] = useState<boolean>(false);
   const [bookmarkCount, setBookmarkCount] = useState<number>(0);
-
-  const [fullRecipe, setFullRecipe] = useState<Recipe | null>(recipe);
 
   const addedText = useMemo(() => {
     const created = fullRecipe?.created_at ? new Date(fullRecipe.created_at) : null;
@@ -88,7 +86,7 @@ export default function RecipeModal({
       : `Added on ${formatMonthDayYearWithComma(created)}`;
   }, [fullRecipe?.created_at]);
 
-  // Lock page scroll while modal is open
+  // lock scroll
   useEffect(() => {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
@@ -98,7 +96,7 @@ export default function RecipeModal({
     };
   }, [open]);
 
-  // Load details (including instructions to compute section order)
+  // load details
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -111,7 +109,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // Fetch latest core recipe row to get instructions (section order)
+      // fetch latest core (for instructions)
       const { data: rRow } = await supabase
         .from('recipes')
         .select('id,user_id,title,cuisine,photo_url,source_url,created_at,instructions')
@@ -120,6 +118,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setFullRecipe((rRow as Recipe) ?? recipe);
 
+      // author
       const { data: profs } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url')
@@ -128,7 +127,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setAuthor((profs?.[0] as Profile) ?? null);
 
-      // Fetch children WITH section labels + ordering
+      // children
       const [{ data: stepData }, { data: ingData }] = await Promise.all([
         supabase
           .from('recipe_steps')
@@ -145,6 +144,7 @@ export default function RecipeModal({
       setSteps((stepData as StepRow[]) || []);
       setIngs((ingData as IngredientRow[]) || []);
 
+      // hearts/bookmarks
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
@@ -194,7 +194,7 @@ export default function RecipeModal({
     };
   }, [open, recipe]);
 
-  // Compute section display order from instructions headings ("Name:")
+  // parse creation order from instructions headings ("Name:")
   const sectionOrderFromInstructions = useMemo(() => {
     const order: string[] = [];
     const seen = new Set<string>();
@@ -214,11 +214,10 @@ export default function RecipeModal({
     return order;
   }, [fullRecipe?.instructions]);
 
-  // Group by section_label (fallback "Main") and order by creation order
+  // group by section, maintain order
   const sections = useMemo(() => {
     type Sec = { ingredients: IngredientRow[]; steps: StepRow[] };
     const map = new Map<string, Sec>();
-
     const add = (key: string) => {
       if (!map.has(key)) map.set(key, { ingredients: [], steps: [] });
     };
@@ -228,14 +227,13 @@ export default function RecipeModal({
       add(key);
       map.get(key)!.ingredients.push(i);
     });
-
     steps.forEach((s) => {
       const key = (s.section_label || 'Main').trim() || 'Main';
       add(key);
       map.get(key)!.steps.push(s);
     });
 
-    // Build ordered names from instructions (creation order), then append leftovers
+    // build ordered list
     const keys = new Set(map.keys());
     const ordered: string[] = [];
 
@@ -245,14 +243,10 @@ export default function RecipeModal({
         keys.delete(name);
       }
     });
-
-    // Ensure "Main" first if present but not captured
     if (keys.has('Main') && !ordered.includes('Main')) {
       ordered.unshift('Main');
       keys.delete('Main');
     }
-
-    // Append any remaining sections (stable alpha fallback)
     const remaining = Array.from(keys).sort((a, b) => a.localeCompare(b));
     ordered.push(...remaining);
 
@@ -468,11 +462,7 @@ export default function RecipeModal({
             <img
               src={fullRecipe.photo_url}
               alt={fullRecipe.title}
-              style={{
-                width: '100%',
-                height: 'auto',
-                display: 'block',
-              }}
+              style={{ width: '100%', height: 'auto', display: 'block' }}
             />
           ) : null}
 
@@ -480,89 +470,72 @@ export default function RecipeModal({
             style={{
               padding: 16,
               paddingBottom: `calc(${FOOTER_HEIGHT_PX}px + env(safe-area-inset-bottom))`,
+              display: 'grid',
+              gap: 12,
             }}
           >
             {/* Title + cuisine */}
-            <div style={{ marginBottom: 12 }}>
+            <div style={{ marginBottom: 4 }}>
               <div style={{ fontSize: 20, fontWeight: 700 }}>
                 {fullRecipe?.title ?? recipe.title}
               </div>
               <div style={{ color: '#666' }}>{fullRecipe?.cuisine || ''}</div>
             </div>
 
-            {/* === COMPONENTS RENDER === */}
-            <section>
-              <h3 style={{ margin: '8px 0' }}>Ingredients & Instructions</h3>
-              {loading ? (
-                <div>Loading…</div>
-              ) : sections.length === 0 ? (
-                <div>No details yet.</div>
-              ) : (
-                <div style={{ display: 'grid', gap: 12 }}>
-                  {sections.map((sec) => (
-                    <div
-                      key={sec.name}
-                      style={{
-                        border: '1px solid #eef2f7',
-                        borderRadius: 10,
-                        padding: 12,
-                        display: 'grid',
-                        gap: 8,
-                      }}
-                    >
-                      <div style={{ fontWeight: 700 }}>{sec.name}</div>
-
-                      {sec.ingredients.length > 0 && (
-                        <div>
-                          <div
-                            style={{
-                              fontWeight: 600,
-                              fontSize: 13,
-                              marginBottom: 6,
-                            }}
-                          >
-                            Ingredients
-                          </div>
-                          <ul style={{ paddingLeft: 16, margin: 0 }}>
-                            {sec.ingredients.map((i, idx) => {
-                              const qty = i.quantity ?? '';
-                              const parts = [qty, i.unit, i.item_name]
-                                .filter(Boolean)
-                                .join(' ');
-                              return (
-                                <li key={idx}>
-                                  {parts}
-                                  {i.note ? ` (${i.note})` : ''}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      )}
-
-                      {sec.steps.length > 0 && (
-                        <div>
-                          <div
-                            style={{
-                              fontWeight: 600,
-                              fontSize: 13,
-                              marginBottom: 6,
-                            }}
-                          >
-                            Instructions
-                          </div>
-                          <ol style={{ paddingLeft: 18, margin: 0 }}>
-                            {sec.steps.map((s, idx) => (
-                              <li key={idx}>{s.body}</li>
-                            ))}
-                          </ol>
-                        </div>
-                      )}
+            {/* INGREDIENTS (all components first) */}
+            {loading ? (
+              <div>Loading…</div>
+            ) : (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {sections.map((sec) => (
+                  <div key={`ing-${sec.name}`} style={{ display: 'grid', gap: 6 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>
+                      {sec.name}: <span style={{ fontWeight: 600 }}>Ingredients</span>
                     </div>
-                  ))}
-                </div>
-              )}
-            </section>
+                    {sec.ingredients.length > 0 ? (
+                      <ul style={{ paddingLeft: 16, margin: 0 }}>
+                        {sec.ingredients.map((i, idx) => {
+                          const qty = i.quantity ?? '';
+                          const parts = [qty, i.unit, i.item_name]
+                            .filter(Boolean)
+                            .join(' ');
+                          return (
+                            <li key={idx}>
+                              {parts}
+                              {i.note ? ` (${i.note})` : ''}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <div style={{ color: '#6b7280', fontSize: 13 }}>No ingredients.</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* INSTRUCTIONS (all components after ingredients) */}
+            {!loading && (
+              <div style={{ display: 'grid', gap: 10 }}>
+                {sections.map((sec) => (
+                  <div key={`steps-${sec.name}`} style={{ display: 'grid', gap: 6 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>
+                      {sec.name}: <span style={{ fontWeight: 600 }}>Instructions</span>
+                    </div>
+                    {sec.steps.length > 0 ? (
+                      <ol style={{ paddingLeft: 18, margin: 0 }}>
+                        {sec.steps.map((s, idx) => (
+                          <li key={idx}>{s.body}</li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <div style={{ color: '#6b7280', fontSize: 13 }}>No instructions.</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {fullRecipe?.source_url ? (
               <a
