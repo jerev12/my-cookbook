@@ -11,14 +11,17 @@ type Recipe = {
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
+  instructions?: string | null; // NEW: used to infer component order
 };
 
-type Step = { step_number: number; body: string };
-type Ingredient = {
+type StepRow = { step_number: number; body: string; section_label: string | null };
+type IngredientRow = {
   item_name: string;
   quantity: number | null;
   unit: string | null;
   note: string | null;
+  section_label: string | null;
+  ingredient_order?: number | null;
 };
 
 type Profile = {
@@ -54,8 +57,8 @@ export default function RecipeModal({
   onClose: () => void;
   recipe: Recipe | null;
 }) {
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [ings, setIngs] = useState<Ingredient[]>([]);
+  const [steps, setSteps] = useState<StepRow[]>([]);
+  const [ings, setIngs] = useState<IngredientRow[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [author, setAuthor] = useState<Profile | null>(null);
@@ -74,14 +77,16 @@ export default function RecipeModal({
   const [busySave, setBusySave] = useState<boolean>(false);
   const [bookmarkCount, setBookmarkCount] = useState<number>(0);
 
+  const [fullRecipe, setFullRecipe] = useState<Recipe | null>(recipe);
+
   const addedText = useMemo(() => {
-    if (!recipe?.created_at) return null;
-    const created = new Date(recipe.created_at);
+    const created = fullRecipe?.created_at ? new Date(fullRecipe.created_at) : null;
+    if (!created) return null;
     const today = new Date();
     return isSameLocalDate(created, today)
       ? 'Added today'
       : `Added on ${formatMonthDayYearWithComma(created)}`;
-  }, [recipe?.created_at]);
+  }, [fullRecipe?.created_at]);
 
   // Lock page scroll while modal is open
   useEffect(() => {
@@ -93,7 +98,7 @@ export default function RecipeModal({
     };
   }, [open]);
 
-  // Load details
+  // Load details (including instructions to compute section order)
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -106,6 +111,15 @@ export default function RecipeModal({
       if (!mounted) return;
       setCurrentUserId(uid);
 
+      // Fetch latest core recipe row to get instructions (section order)
+      const { data: rRow } = await supabase
+        .from('recipes')
+        .select('id,user_id,title,cuisine,photo_url,source_url,created_at,instructions')
+        .eq('id', recipe.id)
+        .single();
+      if (!mounted) return;
+      setFullRecipe((rRow as Recipe) ?? recipe);
+
       const { data: profs } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url')
@@ -114,20 +128,22 @@ export default function RecipeModal({
       if (!mounted) return;
       setAuthor((profs?.[0] as Profile) ?? null);
 
+      // Fetch children WITH section labels + ordering
       const [{ data: stepData }, { data: ingData }] = await Promise.all([
         supabase
           .from('recipe_steps')
-          .select('step_number,body')
+          .select('step_number,body,section_label')
           .eq('recipe_id', recipe.id)
           .order('step_number'),
         supabase
           .from('recipe_ingredients')
-          .select('item_name,quantity,unit,note')
-          .eq('recipe_id', recipe.id),
+          .select('item_name,quantity,unit,note,section_label,ingredient_order')
+          .eq('recipe_id', recipe.id)
+          .order('ingredient_order', { ascending: true }),
       ]);
       if (!mounted) return;
-      setSteps((stepData as Step[]) || []);
-      setIngs((ingData as Ingredient[]) || []);
+      setSteps((stepData as StepRow[]) || []);
+      setIngs((ingData as IngredientRow[]) || []);
 
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
@@ -177,6 +193,71 @@ export default function RecipeModal({
       mounted = false;
     };
   }, [open, recipe]);
+
+  // Compute section display order from instructions headings ("Name:")
+  const sectionOrderFromInstructions = useMemo(() => {
+    const order: string[] = [];
+    const seen = new Set<string>();
+    const lines = (fullRecipe?.instructions || '').split('\n');
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.endsWith(':')) {
+        const name = line.slice(0, -1).trim();
+        const normalized = name || 'Main';
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          order.push(normalized);
+        }
+      }
+    }
+    return order;
+  }, [fullRecipe?.instructions]);
+
+  // Group by section_label (fallback "Main") and order by creation order
+  const sections = useMemo(() => {
+    type Sec = { ingredients: IngredientRow[]; steps: StepRow[] };
+    const map = new Map<string, Sec>();
+
+    const add = (key: string) => {
+      if (!map.has(key)) map.set(key, { ingredients: [], steps: [] });
+    };
+
+    ings.forEach((i) => {
+      const key = (i.section_label || 'Main').trim() || 'Main';
+      add(key);
+      map.get(key)!.ingredients.push(i);
+    });
+
+    steps.forEach((s) => {
+      const key = (s.section_label || 'Main').trim() || 'Main';
+      add(key);
+      map.get(key)!.steps.push(s);
+    });
+
+    // Build ordered names from instructions (creation order), then append leftovers
+    const keys = new Set(map.keys());
+    const ordered: string[] = [];
+
+    sectionOrderFromInstructions.forEach((name) => {
+      if (keys.has(name)) {
+        ordered.push(name);
+        keys.delete(name);
+      }
+    });
+
+    // Ensure "Main" first if present but not captured
+    if (keys.has('Main') && !ordered.includes('Main')) {
+      ordered.unshift('Main');
+      keys.delete('Main');
+    }
+
+    // Append any remaining sections (stable alpha fallback)
+    const remaining = Array.from(keys).sort((a, b) => a.localeCompare(b));
+    ordered.push(...remaining);
+
+    return ordered.map((name) => ({ name, ...map.get(name)! }));
+  }, [ings, steps, sectionOrderFromInstructions]);
 
   async function toggleHeart() {
     if (!currentUserId || !recipe || busyHeart) return;
@@ -383,10 +464,10 @@ export default function RecipeModal({
             WebkitOverflowScrolling: 'touch',
           }}
         >
-          {recipe.photo_url ? (
+          {fullRecipe?.photo_url ? (
             <img
-              src={recipe.photo_url}
-              alt={recipe.title}
+              src={fullRecipe.photo_url}
+              alt={fullRecipe.title}
               style={{
                 width: '100%',
                 height: 'auto',
@@ -403,52 +484,89 @@ export default function RecipeModal({
           >
             {/* Title + cuisine */}
             <div style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{recipe.title}</div>
-              <div style={{ color: '#666' }}>{recipe.cuisine || ''}</div>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>
+                {fullRecipe?.title ?? recipe.title}
+              </div>
+              <div style={{ color: '#666' }}>{fullRecipe?.cuisine || ''}</div>
             </div>
 
+            {/* === COMPONENTS RENDER === */}
             <section>
-              <h3 style={{ margin: '8px 0' }}>Ingredients</h3>
+              <h3 style={{ margin: '8px 0' }}>Ingredients & Instructions</h3>
               {loading ? (
                 <div>Loading…</div>
+              ) : sections.length === 0 ? (
+                <div>No details yet.</div>
               ) : (
-                <ul style={{ paddingLeft: 16 }}>
-                  {ings.length ? (
-                    ings.map((i, idx) => {
-                      const qty = i.quantity ?? '';
-                      const parts = [qty, i.unit, i.item_name].filter(Boolean).join(' ');
-                      return (
-                        <li key={idx}>
-                          {parts}
-                          {i.note ? ` (${i.note})` : ''}
-                        </li>
-                      );
-                    })
-                  ) : (
-                    <li>No ingredients yet.</li>
-                  )}
-                </ul>
+                <div style={{ display: 'grid', gap: 12 }}>
+                  {sections.map((sec) => (
+                    <div
+                      key={sec.name}
+                      style={{
+                        border: '1px solid #eef2f7',
+                        borderRadius: 10,
+                        padding: 12,
+                        display: 'grid',
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ fontWeight: 700 }}>{sec.name}</div>
+
+                      {sec.ingredients.length > 0 && (
+                        <div>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              fontSize: 13,
+                              marginBottom: 6,
+                            }}
+                          >
+                            Ingredients
+                          </div>
+                          <ul style={{ paddingLeft: 16, margin: 0 }}>
+                            {sec.ingredients.map((i, idx) => {
+                              const qty = i.quantity ?? '';
+                              const parts = [qty, i.unit, i.item_name]
+                                .filter(Boolean)
+                                .join(' ');
+                              return (
+                                <li key={idx}>
+                                  {parts}
+                                  {i.note ? ` (${i.note})` : ''}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      )}
+
+                      {sec.steps.length > 0 && (
+                        <div>
+                          <div
+                            style={{
+                              fontWeight: 600,
+                              fontSize: 13,
+                              marginBottom: 6,
+                            }}
+                          >
+                            Instructions
+                          </div>
+                          <ol style={{ paddingLeft: 18, margin: 0 }}>
+                            {sec.steps.map((s, idx) => (
+                              <li key={idx}>{s.body}</li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </section>
 
-            <section>
-              <h3 style={{ margin: '8px 0' }}>Instructions</h3>
-              {loading ? (
-                <div>Loading…</div>
-              ) : (
-                <ol style={{ paddingLeft: 18 }}>
-                  {steps.length ? (
-                    steps.map((s, idx) => <li key={idx}>{s.body}</li>)
-                  ) : (
-                    <li>This recipe has no steps yet.</li>
-                  )}
-                </ol>
-              )}
-            </section>
-
-            {recipe.source_url ? (
+            {fullRecipe?.source_url ? (
               <a
-                href={recipe.source_url}
+                href={fullRecipe.source_url}
                 target="_blank"
                 rel="noreferrer"
                 style={{ color: '#0b5' }}
