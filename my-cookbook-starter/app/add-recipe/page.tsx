@@ -466,7 +466,7 @@ function AddRecipeForm() {
             visibility,
             photo_url: photoUrl || null,
             recipe_types: recipeTypes,
-            // keep instructions text (used for ordering hints). If in component mode, we keep as concatenation of headings + steps:
+            // keep instructions text (used for ordering hints)
             instructions: useComponents
               ? components.map(c => `${(c.title || 'Main').trim() || 'Main'}:\n${c.instructions.trim()}\n`).join('\n')
               : instructions,
@@ -504,7 +504,6 @@ function AddRecipeForm() {
           }
         } else {
           // COMPONENT MODE
-          // Flatten ingredients and steps with section labels
           const flatIngs: DBIngredient[] = [];
           const flatSteps: DBStep[] = [];
           components.forEach((c) => {
@@ -516,7 +515,7 @@ function AddRecipeForm() {
                 flatIngs.push({ item_name, quantity: null, unit: null, note: null, section_label: label, ingredient_order: idx + 1 });
               });
             const lines = c.instructions.split('\n').map(s => s.trim()).filter(Boolean);
-            lines.forEach((body, i) => {
+            lines.forEach((body) => {
               flatSteps.push({ step_number: flatSteps.length + 1, body, section_label: label });
             });
           });
@@ -758,7 +757,13 @@ function AddRecipeForm() {
               <label style={{ fontWeight: 600 }}>
                 Instructions <span style={{ color: '#6b7280', fontWeight: 400 }}>(one step per line)</span>
               </label>
-              <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={7} placeholder={`1. Preheat oven...\n2. Mix dry ingredients...\n3. ...`} style={{ ...fieldStyle, resize: 'vertical', minHeight: 140 }} />
+              <textarea
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                rows={7}
+                placeholder={`e.g., Preheat oven...\ne.g., Mix dry ingredients...\ne.g., Bake for 30 minutes`}
+                style={{ ...fieldStyle, resize: 'vertical', minHeight: 140 }}
+              />
             </div>
 
             {/* Add Component CTA + info */}
@@ -778,10 +783,21 @@ function AddRecipeForm() {
                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', lineHeight: 0 }}
                 title="What are components?"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2">
+                {/* Cleaner “i” info icon */}
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="#6b7280"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="8" />
-                  <path d="M10.5 12a1.5 1.5 0 1 1 3 0c0 1.5-1.5 1.5-1.5 3" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
                 </svg>
               </button>
 
@@ -797,7 +813,8 @@ function AddRecipeForm() {
                     fontSize: 13,
                   }}
                 >
-                  Use <b>components</b> for recipes with multiple parts (e.g., cake + frosting) where each part has its own ingredients and instructions.
+                  Use <b>components</b> for recipes with multiple parts (e.g., cake + frosting)
+                  where each part has its own ingredients and instructions.
                 </div>
               )}
             </div>
@@ -898,7 +915,7 @@ function AddRecipeForm() {
                         value={c.instructions}
                         onChange={(e) => updateComponentInstructions(c.id, e.target.value)}
                         rows={6}
-                        placeholder={`1. ...\n2. ...`}
+                        placeholder={`e.g., Preheat oven...\ne.g., Mix dry ingredients...\ne.g., Bake for 30 minutes`}
                         style={{ ...fieldStyle, resize: 'vertical', minHeight: 120 }}
                       />
                     </div>
