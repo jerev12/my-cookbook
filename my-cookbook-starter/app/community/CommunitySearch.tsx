@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
 // ⬇️ Update this path if your modal sits elsewhere
-const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
+const RecipeModal = dynamic(() => import('@/components/RecipeModal'), { ssr: false });
 
 type TabKey = 'recipes' | 'users';
 
@@ -19,11 +19,13 @@ type Profile = {
 
 type RecipeRow = {
   id: string;
+  user_id: string;
   title: string;
   cuisine: string | null;
-  visibility: 'public' | 'friends' | 'private' | string;
-  user_id: string;
   photo_url: string | null;
+  source_url: string | null;
+  created_at: string | null;
+  visibility?: 'public' | 'friends' | 'private' | string; // present in search RPC; harmless if absent
 };
 
 type FriendRelation = 'none' | 'pending_outgoing' | 'pending_incoming' | 'friends';
@@ -55,7 +57,7 @@ export default function CommunitySearch() {
 
   // modal state
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalRecipe, setModalRecipe] = useState<any>(null); // set to your Recipe type if you have one
+  const [modalRecipe, setModalRecipe] = useState<any>(null); // use your Recipe type if available
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -152,11 +154,11 @@ export default function CommunitySearch() {
   async function openRecipe(rid: string) {
     try {
       setModalOpen(true);
-      setModalRecipe(null); // show modal; content loads shortly after
+      setModalRecipe(null);
 
       const { data, error } = await supabase
         .from('recipes')
-        .select('id, title, cuisine, visibility, user_id, photo_url, instructions, source_url, created_at')
+        .select('id,user_id,title,cuisine,photo_url,source_url,created_at')
         .eq('id', rid)
         .single();
 
@@ -219,6 +221,7 @@ export default function CommunitySearch() {
   }
 
   // ------- STYLES (inline, typed with CSSProperties) -------
+  // Container stays max 640px for this page, but the CARD styles now exactly match My Cookbook.
   const S = {
     container: {
       width: '100%',
@@ -266,69 +269,32 @@ export default function CommunitySearch() {
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
 
-    // Cookbook-like cards
+    // >>> MATCHING MY COOKBOOK CARDS <<<
     cardList: {
       display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
       gap: 12,
     } as CSSProperties,
-    // Button-like clickable card (for modal)
     cardButton: {
-      display: 'block',
-      width: '100%',
-      textAlign: 'left' as const,
-      padding: 0,
-      border: '1px solid #e5e7eb',
-      borderRadius: 10,
+      border: '1px solid #eee',
+      borderRadius: 12,
+      padding: 10,
       background: '#fff',
-      overflow: 'hidden',
+      textAlign: 'left' as const,
       cursor: 'pointer',
+      width: '100%',
     } as CSSProperties,
     image: {
       width: '100%',
-      height: 168,
+      aspectRatio: '4 / 3',
       objectFit: 'cover',
-      background: '#f3f4f6',
+      borderRadius: 8,
       display: 'block',
     } as CSSProperties,
-    cardBody: { padding: 12 } as CSSProperties,
-    title: {
-      fontWeight: 600,
-      fontSize: 15,
-      lineHeight: 1.25,
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-    } as CSSProperties,
-    metaRow: {
-      marginTop: 8,
-      display: 'flex',
-      alignItems: 'center',
-      gap: 8,
-      flexWrap: 'wrap',
-    } as CSSProperties,
-    chip: {
-      display: 'inline-block',
-      fontSize: 11,
-      lineHeight: 1,
-      padding: '6px 8px',
-      borderRadius: 9999,
-      background: '#f3f4f6',
-      color: '#374151',
-    } as CSSProperties,
-    badge: {
-      display: 'inline-block',
-      fontSize: 10,
-      lineHeight: 1,
-      padding: '5px 8px',
-      borderRadius: 6,
-      background: '#eef2ff',
-      color: '#3730a3',
-      textTransform: 'uppercase' as const,
-      letterSpacing: 0.4,
-    } as CSSProperties,
+    rTitle: { fontWeight: 600, marginTop: 6, fontSize: 14 } as CSSProperties,
+    rCuisine: { color: '#666', fontSize: 12 } as CSSProperties,
 
-    // Users list
+    // Users list styles (unchanged)
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -507,7 +473,7 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Recipes grid (Cookbook-like) */}
+          {/* Recipes grid — EXACT match to My Cookbook card style */}
           {!loading && !errMsg && tab === 'recipes' && (
             <div style={S.cardList}>
               {recipes.length === 0 ? (
@@ -516,30 +482,16 @@ export default function CommunitySearch() {
                 recipes.map((r) => (
                   <button
                     key={r.id}
-                    style={S.cardButton}
                     onClick={() => openRecipe(r.id)}
+                    style={S.cardButton}
                     aria-label={`Open ${r.title}`}
                   >
-                    {/* Photo */}
                     {r.photo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={r.photo_url} alt={r.title} style={S.image} />
-                    ) : (
-                      <div style={S.image} />
-                    )}
-
-                    {/* Body */}
-                    <div style={S.cardBody}>
-                      <div style={S.title} title={r.title}>
-                        {r.title}
-                      </div>
-                      <div style={S.metaRow}>
-                        <span style={S.chip}>{r.cuisine || 'Unknown cuisine'}</span>
-                        {r.visibility !== 'public' && (
-                          <span style={S.badge}>{String(r.visibility).toUpperCase()}</span>
-                        )}
-                      </div>
-                    </div>
+                    ) : null}
+                    <div style={S.rTitle}>{r.title}</div>
+                    <div style={S.rCuisine}>{r.cuisine || '—'}</div>
                   </button>
                 ))
               )}
@@ -584,8 +536,8 @@ export default function CommunitySearch() {
 function useDebounce<T>(value: T, delay = 300) {
   const [v, setV] = useState(value);
   useEffect(() => {
-      const t = setTimeout(() => setV(value), delay);
-      return () => clearTimeout(t);
+    const t = setTimeout(() => setV(value), delay);
+    return () => clearTimeout(t);
   }, [value, delay]);
   return v;
 }
