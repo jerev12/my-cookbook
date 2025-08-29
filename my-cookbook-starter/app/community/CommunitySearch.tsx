@@ -25,7 +25,7 @@ type RecipeRow = {
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
-  visibility?: 'public' | 'friends' | 'private' | string; // present in search RPC; harmless if absent
+  visibility?: 'public' | 'friends' | 'private' | string;
 };
 
 type FriendRelation = 'none' | 'pending_outgoing' | 'pending_incoming' | 'friends';
@@ -39,7 +39,6 @@ export default function CommunitySearch() {
   const [q, setQ] = useState('');
   const debouncedQ = useDebounce(q, 300);
   const queryActive = debouncedQ.trim().length > 0; // only search after typing
-  const [cuisineFilter, setCuisineFilter] = useState<string>('');
 
   // paging
   const [page, setPage] = useState(0);
@@ -57,7 +56,7 @@ export default function CommunitySearch() {
 
   // modal state
   const [modalOpen, setModalOpen] = useState(false);
-  const [modalRecipe, setModalRecipe] = useState<any>(null); // use your Recipe type if available
+  const [modalRecipe, setModalRecipe] = useState<any>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -72,7 +71,7 @@ export default function CommunitySearch() {
   // reset page when inputs change
   useEffect(() => {
     setPage(0);
-  }, [tab, debouncedQ, cuisineFilter]);
+  }, [tab, debouncedQ]);
 
   // fetch when deps change (but only after user typed something)
   useEffect(() => {
@@ -86,7 +85,7 @@ export default function CommunitySearch() {
     }
     void fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, debouncedQ, page, cuisineFilter, myId, queryActive]);
+  }, [tab, debouncedQ, page, myId, queryActive]);
 
   async function fetchData() {
     setLoading(true);
@@ -132,7 +131,7 @@ export default function CommunitySearch() {
           q: debouncedQ || null,
           limit_count: PAGE_SIZE,
           offset_count: page * PAGE_SIZE,
-          cuisine_filter: cuisineFilter || null,
+          cuisine_filter: null, // removed cuisine dropdown per request
         });
         if (error) throw error;
 
@@ -221,7 +220,6 @@ export default function CommunitySearch() {
   }
 
   // ------- STYLES (inline, typed with CSSProperties) -------
-  // Container stays max 640px for this page, but the CARD styles now exactly match My Cookbook.
   const S = {
     container: {
       width: '100%',
@@ -254,22 +252,15 @@ export default function CommunitySearch() {
       display: 'block',
       width: '100%',
       padding: '10px 12px',
-      border: '1px solid #e5e7eb',
+      border: '1px solid '#e5e7eb',
       borderRadius: 8,
       boxSizing: 'border-box',
       fontSize: 14,
       minWidth: 0,
     } as CSSProperties,
-    select: {
-      padding: '10px 10px',
-      border: '1px solid #e5e7eb',
-      borderRadius: 8,
-      fontSize: 12,
-      background: '#fff',
-    } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
 
-    // >>> MATCHING MY COOKBOOK CARDS <<<
+    // My Cookbook card match
     cardList: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
@@ -290,11 +281,21 @@ export default function CommunitySearch() {
       objectFit: 'cover',
       borderRadius: 8,
       display: 'block',
+      background: '#f3f4f6',
+    } as CSSProperties,
+    placeholder: {
+      width: '100%',
+      aspectRatio: '4 / 3',
+      borderRadius: 8,
+      background:
+        'linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 37%, #f3f4f6 63%)',
+      backgroundSize: '400% 100%',
+      animation: 'shimmer 1.4s ease infinite',
     } as CSSProperties,
     rTitle: { fontWeight: 600, marginTop: 6, fontSize: 14 } as CSSProperties,
     rCuisine: { color: '#666', fontSize: 12 } as CSSProperties,
 
-    // Users list styles (unchanged)
+    // Users list
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -304,10 +305,18 @@ export default function CommunitySearch() {
       padding: 8,
       gap: 8,
     } as CSSProperties,
-    userLeft: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 } as CSSProperties,
+    userLeftLink: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 8,
+      minWidth: 0,
+      textDecoration: 'none',     // <-- remove link look
+      color: '#111827',           // <-- neutral dark
+    } as CSSProperties,
     avatar: { width: 32, height: 32, borderRadius: '50%', objectFit: 'cover' as const } as CSSProperties,
     name: {
       fontSize: 14,
+      fontWeight: 600,            // <-- more “official”
       whiteSpace: 'nowrap',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
@@ -375,21 +384,7 @@ export default function CommunitySearch() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-        {tab === 'recipes' && (
-          <select
-            style={{ ...S.select, opacity: queryActive ? 1 : 0.6 }}
-            value={cuisineFilter}
-            onChange={(e) => setCuisineFilter(e.target.value)}
-            aria-label="Filter by cuisine"
-            disabled={!queryActive}
-          >
-            <option value="">All cuisines</option>
-            <option value="Italian">Italian</option>
-            <option value="Mexican">Mexican</option>
-            <option value="Indian">Indian</option>
-            <option value="Chinese">Chinese</option>
-          </select>
-        )}
+        {/* Cuisine dropdown removed as requested */}
       </div>
 
       {/* If no query yet, show a gentle prompt and stop here */}
@@ -453,8 +448,7 @@ export default function CommunitySearch() {
 
                   return (
                     <div key={p.id} style={S.userRow}>
-                      <Link href={`/profiles/${p.id}`} style={S.userLeft}>
-                        {/* avatar */}
+                      <Link href={`/profiles/${p.id}`} style={S.userLeftLink}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={p.avatar_url ?? '/avatar-placeholder.png'}
@@ -473,7 +467,7 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Recipes grid — EXACT match to My Cookbook card style */}
+          {/* Recipes grid — matches My Cookbook */}
           {!loading && !errMsg && tab === 'recipes' && (
             <div style={S.cardList}>
               {recipes.length === 0 ? (
@@ -486,10 +480,13 @@ export default function CommunitySearch() {
                     style={S.cardButton}
                     aria-label={`Open ${r.title}`}
                   >
+                    {/* Photo / placeholder to guarantee layout */}
                     {r.photo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={r.photo_url} alt={r.title} style={S.image} />
-                    ) : null}
+                    ) : (
+                      <div style={S.placeholder} />
+                    )}
                     <div style={S.rTitle}>{r.title}</div>
                     <div style={S.rCuisine}>{r.cuisine || '—'}</div>
                   </button>
