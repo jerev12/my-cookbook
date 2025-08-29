@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
 // ⬇️ Update this path if your modal sits elsewhere
-const RecipeModal = dynamic(() => import('@/components/RecipeModal'), { ssr: false });
+const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
 
 type TabKey = 'recipes' | 'users';
 
