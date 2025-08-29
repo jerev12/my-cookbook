@@ -14,6 +14,8 @@ type IngredientRow = {
 };
 
 /* ---------- Helpers ---------- */
+
+// Canvas-crop a loaded image (by pixel area) to a JPEG Blob
 async function getCroppedBlob(
   imageSrc: string,
   crop: { x: number; y: number; width: number; height: number }
@@ -47,6 +49,9 @@ async function getCroppedBlob(
   );
 }
 
+/** Extract the storage path from a Supabase public URL:
+ *  /storage/v1/object/public/recipe-photos/<path>  ->  <path>
+ */
 function storagePathFromPublicUrl(publicUrl: string): string | null {
   try {
     const u = new URL(publicUrl);
@@ -60,6 +65,7 @@ function storagePathFromPublicUrl(publicUrl: string): string | null {
 }
 
 /* ---------- Page wrapper ---------- */
+
 export default function AddRecipePage() {
   return (
     <Suspense
@@ -74,17 +80,18 @@ export default function AddRecipePage() {
   );
 }
 
-/* ---------- Reusable field styles (smaller, comfy) ---------- */
+/* ---------- Reusable field style ---------- */
 const fieldStyle: React.CSSProperties = {
   width: '100%',
-  padding: 8,            // smaller padding so it doesn’t touch card edges visually
-  borderRadius: 6,       // a bit tighter
+  padding: 8,
+  borderRadius: 6,
   border: '1px solid #e5e7eb',
   background: '#fff',
   boxSizing: 'border-box',
 };
 
 /* ---------- Main component ---------- */
+
 function AddRecipeForm() {
   const router = useRouter();
   const sp = useSearchParams();
@@ -100,15 +107,15 @@ function AddRecipeForm() {
   // form state
   const [title, setTitle] = useState('');
   const [cuisine, setCuisine] = useState('');
-  const [sourceUrl, setSourceUrl] = useState('');    // label changes to “Recipe URL”
+  const [sourceUrl, setSourceUrl] = useState(''); // label shows "Recipe URL (optional)"
   const [instructions, setInstructions] = useState(''); // one step per line
   const [ingredients, setIngredients] = useState<string[]>(['']);
   const [visibility, setVisibility] = useState<Visibility>('private');
 
   // photo state
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const oldPhotoPathRef = useRef<string | null>(null);
-  const [localPhotoSrc, setLocalPhotoSrc] = useState<string | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null); // public URL
+  const oldPhotoPathRef = useRef<string | null>(null);           // storage path of current photo
+  const [localPhotoSrc, setLocalPhotoSrc] = useState<string | null>(null); // object URL for cropper
   const [showCropper, setShowCropper] = useState(false);
   const [crop, setCrop] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -141,6 +148,7 @@ function AddRecipeForm() {
       setMsg(null);
       setBusy(true);
 
+      // Load base recipe (includes photo_url)
       const { data: recs, error: recErr } = await supabase
         .from('recipes')
         .select('id, user_id, title, cuisine, source_url, visibility, photo_url')
@@ -160,6 +168,7 @@ function AddRecipeForm() {
         return;
       }
 
+      // Set form
       setTitle(r.title ?? '');
       setCuisine(r.cuisine ?? '');
       setSourceUrl(r.source_url ?? '');
@@ -167,6 +176,7 @@ function AddRecipeForm() {
       setPhotoUrl(r.photo_url ?? null);
       oldPhotoPathRef.current = r.photo_url ? storagePathFromPublicUrl(r.photo_url) : null;
 
+      // Load ingredients & steps
       const [{ data: ingData, error: ingErr }, { data: stepData, error: stepErr }] =
         await Promise.all([
           supabase.from('recipe_ingredients').select('item_name').eq('recipe_id', editId),
@@ -174,6 +184,7 @@ function AddRecipeForm() {
         ]);
 
       if (!mounted) return;
+
       if (ingErr || stepErr) {
         setMsg(ingErr?.message || stepErr?.message || 'Failed to load ingredients/steps.');
         setBusy(false);
@@ -197,6 +208,7 @@ function AddRecipeForm() {
   function onPickFile() {
     fileInputRef.current?.click();
   }
+
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -206,6 +218,7 @@ function AddRecipeForm() {
     setZoom(1);
     setCrop({ x: 0, y: 0 });
   }
+
   function onCropComplete(_: any, areaPixels: any) {
     setCroppedPixels(areaPixels);
   }
@@ -218,22 +231,27 @@ function AddRecipeForm() {
 
       const blob = await getCroppedBlob(localPhotoSrc, croppedPixels);
 
+      // Ensure user is signed in
       const { data: userRes } = await supabase.auth.getUser();
       const userId = userRes?.user?.id;
       if (!userId) throw new Error('No signed-in user — please log in again.');
 
+      // Use unique filename each time (avoid CDN cache)
       const base = (sp.get('id') || crypto.randomUUID()).toString();
       const filename = `${base}-${Date.now()}.jpg`;
       const newPath = `${userId}/${filename}`;
 
+      // 1) Upload new file
       const upRes = await supabase.storage
         .from('recipe-photos')
         .upload(newPath, blob, { contentType: 'image/jpeg' });
       if (upRes.error) throw upRes.error;
 
+      // 2) Get its public URL
       const { data: pub } = supabase.storage.from('recipe-photos').getPublicUrl(newPath);
       const newPublicUrl = pub.publicUrl;
 
+      // 3) If editing, persist immediately
       if (isEditing && editId) {
         const { error: upErr } = await supabase
           .from('recipes')
@@ -243,14 +261,19 @@ function AddRecipeForm() {
         if (upErr) throw upErr;
       }
 
+      // 4) Swap UI to new image
       setPhotoUrl(newPublicUrl);
 
+      // 5) Delete previous file if any
       const prevPath = oldPhotoPathRef.current;
       if (prevPath && prevPath !== newPath) {
         await supabase.storage.from('recipe-photos').remove([prevPath]);
       }
+
+      // 6) Update ref to new file
       oldPhotoPathRef.current = newPath;
 
+      // 7) Close cropper & cleanup
       setShowCropper(false);
       URL.revokeObjectURL(localPhotoSrc);
       setLocalPhotoSrc(null);
@@ -276,12 +299,14 @@ function AddRecipeForm() {
       const userId = userRes?.user?.id;
       if (!userId) throw new Error('No signed-in user — please log in again.');
 
+      // Delete file if we know the path
       const path = oldPhotoPathRef.current || storagePathFromPublicUrl(photoUrl);
       if (path) {
         const { error: delErr } = await supabase.storage.from('recipe-photos').remove([path]);
         if (delErr) throw delErr;
       }
 
+      // Clear DB if editing
       if (isEditing && editId) {
         const { error: upErr } = await supabase
           .from('recipes')
@@ -331,6 +356,7 @@ function AddRecipeForm() {
 
     try {
       if (isEditing && editId) {
+        // UPDATE base row
         const { error: upErr } = await supabase
           .from('recipes')
           .update({
@@ -344,6 +370,7 @@ function AddRecipeForm() {
           .eq('user_id', userId);
         if (upErr) throw upErr;
 
+        // Replace ingredients/steps
         const [{ error: d1 }, { error: d2 }] = await Promise.all([
           supabase.from('recipe_ingredients').delete().eq('recipe_id', editId),
           supabase.from('recipe_steps').delete().eq('recipe_id', editId),
@@ -368,6 +395,7 @@ function AddRecipeForm() {
         return;
       }
 
+      // CREATE via RPC (includes photo_url)
       const { error } = await supabase.rpc('add_full_recipe', {
         p_title: title,
         p_cuisine: cuisine || null,
@@ -381,6 +409,7 @@ function AddRecipeForm() {
 
       if (error) throw error;
 
+      // Reset + go back
       setTitle('');
       setCuisine('');
       setSourceUrl('');
@@ -419,7 +448,7 @@ function AddRecipeForm() {
 
   /* ------ LAYOUT ------ */
   return (
-    <main style={{ maxWidth: 760, margin: '28px auto', padding: 16, paddingBottom: 96 }}>
+    <main style={{ maxWidth: 760, margin: '28px auto', padding: 16 }}>
       {/* Header */}
       <header
         style={{
@@ -432,35 +461,6 @@ function AddRecipeForm() {
         <h1 style={{ margin: 0, fontSize: 22 }}>
           {isEditing ? 'Edit Recipe' : 'Add a Recipe'}
         </h1>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => router.back()}
-            style={{
-              background: 'transparent',
-              border: '1px solid #e5e7eb',
-              borderRadius: 8,
-              padding: '8px 12px',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={busy}
-            style={{
-              background: '#111827',
-              color: 'white',
-              border: 'none',
-              borderRadius: 8,
-              padding: '8px 12px',
-              opacity: busy ? 0.7 : 1,
-            }}
-          >
-            {busy ? 'Saving…' : isEditing ? 'Save Changes' : 'Save'}
-          </button>
-        </div>
       </header>
 
       {msg && (
@@ -484,11 +484,9 @@ function AddRecipeForm() {
           background: '#fff',
           border: '1px solid #eee',
           borderRadius: 12,
-          padding: 14,            // slightly tighter
+          padding: 14,
           display: 'grid',
           gap: 12,
-          overflow: 'visible',    // allow inner rounding/shadows to breathe
-          position: 'relative',
         }}
       >
         {/* Photo */}
@@ -678,28 +676,25 @@ function AddRecipeForm() {
             <option value="public">Public (everyone)</option>
           </select>
         </div>
-      </section>
 
-      {/* Sticky footer actions */}
-      <div
-        style={{
-          position: 'sticky',
-          bottom: 0,
-          marginTop: 16,
-          background: 'linear-gradient(to top, white 70%, transparent)',
-          paddingTop: 8,
-          zIndex: 10,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', background: '#fff', padding: '8px 0' }}>
+        {/* Action buttons inside the card */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 10,
+            marginTop: 10,
+          }}
+        >
           <button
             type="button"
             onClick={() => router.back()}
             style={{
+              width: '100%',
               background: 'transparent',
               border: '1px solid #e5e7eb',
               borderRadius: 8,
-              padding: '10px 14px',
+              padding: '12px 14px',
             }}
           >
             Cancel
@@ -709,18 +704,19 @@ function AddRecipeForm() {
             onClick={submit}
             disabled={busy}
             style={{
+              width: '100%',
               background: '#111827',
               color: 'white',
               border: 'none',
               borderRadius: 8,
-              padding: '10px 14px',
+              padding: '12px 14px',
               opacity: busy ? 0.7 : 1,
             }}
           >
             {busy ? 'Saving…' : isEditing ? 'Save Changes' : 'Save Recipe'}
           </button>
         </div>
-      </div>
+      </section>
 
       {/* Cropper modal */}
       {showCropper && (
@@ -769,9 +765,9 @@ function AddRecipeForm() {
               )}
             </div>
 
-            {/* Modal footer: two equal buttons that fill the width */}
+            {/* Modal footer: slider full width + two equal buttons */}
             <div style={{ padding: 12, borderTop: '1px solid #f1f5f9' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <input
                   type="range"
                   min={1}
@@ -781,7 +777,6 @@ function AddRecipeForm() {
                   onChange={(e) => setZoom(parseFloat(e.target.value))}
                   style={{ gridColumn: '1 / -1', width: '100%' }}
                 />
-
                 <button
                   type="button"
                   onClick={() => {
@@ -799,7 +794,6 @@ function AddRecipeForm() {
                 >
                   Cancel
                 </button>
-
                 <button
                   type="button"
                   onClick={confirmCrop}
