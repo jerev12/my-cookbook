@@ -86,7 +86,7 @@ export default function RecipeModal({
       : `Added on ${formatMonthDayYearWithComma(created)}`;
   }, [fullRecipe?.created_at]);
 
-  // lock scroll
+  // lock page scroll
   useEffect(() => {
     if (!open) return;
     const prevOverflow = document.body.style.overflow;
@@ -482,18 +482,17 @@ export default function RecipeModal({
               <div style={{ color: '#666' }}>{fullRecipe?.cuisine || ''}</div>
             </div>
 
-            {/* INGREDIENTS (all components first) */}
-            {loading ? (
-              <div>Loading…</div>
-            ) : (
-              <div style={{ display: 'grid', gap: 10 }}>
-                {sections.map((sec) => (
-                  <div key={`ing-${sec.name}`} style={{ display: 'grid', gap: 6 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>
-                      {sec.name}: <span style={{ fontWeight: 600 }}>Ingredients</span>
-                    </div>
+            {/* INGREDIENTS grouped under one heading */}
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>Ingredients:</div>
+              {loading ? (
+                <div>Loading…</div>
+              ) : (
+                sections.map((sec) => (
+                  <div key={`ing-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
+                    <div style={{ fontWeight: 600 }}>{sec.name}</div>
                     {sec.ingredients.length > 0 ? (
-                      <ul style={{ paddingLeft: 16, margin: 0 }}>
+                      <ul style={{ paddingLeft: 18, margin: 0 }}>
                         {sec.ingredients.map((i, idx) => {
                           const qty = i.quantity ?? '';
                           const parts = [qty, i.unit, i.item_name]
@@ -508,34 +507,39 @@ export default function RecipeModal({
                         })}
                       </ul>
                     ) : (
-                      <div style={{ color: '#6b7280', fontSize: 13 }}>No ingredients.</div>
+                      <div style={{ color: '#6b7280', fontSize: 13 }}>
+                        No ingredients.
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-            )}
+                ))
+              )}
+            </div>
 
-            {/* INSTRUCTIONS (all components after ingredients) */}
-            {!loading && (
-              <div style={{ display: 'grid', gap: 10 }}>
-                {sections.map((sec) => (
-                  <div key={`steps-${sec.name}`} style={{ display: 'grid', gap: 6 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>
-                      {sec.name}: <span style={{ fontWeight: 600 }}>Instructions</span>
-                    </div>
+            {/* INSTRUCTIONS grouped under one heading */}
+            <div style={{ display: 'grid', gap: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>Instructions:</div>
+              {loading ? (
+                <div>Loading…</div>
+              ) : (
+                sections.map((sec) => (
+                  <div key={`steps-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
+                    <div style={{ fontWeight: 600 }}>{sec.name}</div>
                     {sec.steps.length > 0 ? (
-                      <ol style={{ paddingLeft: 18, margin: 0 }}>
+                      <ol style={{ paddingLeft: 20, margin: 0 }}>
                         {sec.steps.map((s, idx) => (
                           <li key={idx}>{s.body}</li>
                         ))}
                       </ol>
                     ) : (
-                      <div style={{ color: '#6b7280', fontSize: 13 }}>No instructions.</div>
+                      <div style={{ color: '#6b7280', fontSize: 13 }}>
+                        No instructions.
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-            )}
+                ))
+              )}
+            </div>
 
             {fullRecipe?.source_url ? (
               <a
