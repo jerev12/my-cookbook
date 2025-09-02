@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import {
+  emitRecipeMutation,
+  subscribeRecipeMutations,
+} from '@/lib/recipeSync';
 
 type Recipe = {
   id: string;
@@ -11,7 +15,7 @@ type Recipe = {
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
-  instructions?: string | null; // used to infer component order
+  instructions?: string | null;
 };
 
 type StepRow = { step_number: number; body: string; section_label: string | null };
@@ -109,7 +113,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // fetch latest core (for instructions)
+      // fetch latest core
       const { data: rRow } = await supabase
         .from('recipes')
         .select('id,user_id,title,cuisine,photo_url,source_url,created_at,instructions')
@@ -194,64 +198,23 @@ export default function RecipeModal({
     };
   }, [open, recipe]);
 
-  // parse creation order from instructions headings ("Name:")
-  const sectionOrderFromInstructions = useMemo(() => {
-    const order: string[] = [];
-    const seen = new Set<string>();
-    const lines = (fullRecipe?.instructions || '').split('\n');
-    for (const raw of lines) {
-      const line = raw.trim();
-      if (!line) continue;
-      if (line.endsWith(':')) {
-        const name = line.slice(0, -1).trim();
-        const normalized = name || 'Main';
-        if (!seen.has(normalized)) {
-          seen.add(normalized);
-          order.push(normalized);
-        }
+  // subscribe to sync messages
+  useEffect(() => {
+    if (!recipe) return;
+    const unsubscribe = subscribeRecipeMutations((m) => {
+      if (m.id !== recipe.id) return;
+
+      if (m.heartDelta != null) {
+        setHeartCount((c) => Math.max(0, c + m.heartDelta!));
       }
-    }
-    return order;
-  }, [fullRecipe?.instructions]);
-
-  // group by section, maintain order
-  const sections = useMemo(() => {
-    type Sec = { ingredients: IngredientRow[]; steps: StepRow[] };
-    const map = new Map<string, Sec>();
-    const add = (key: string) => {
-      if (!map.has(key)) map.set(key, { ingredients: [], steps: [] });
-    };
-
-    ings.forEach((i) => {
-      const key = (i.section_label || 'Main').trim() || 'Main';
-      add(key);
-      map.get(key)!.ingredients.push(i);
-    });
-    steps.forEach((s) => {
-      const key = (s.section_label || 'Main').trim() || 'Main';
-      add(key);
-      map.get(key)!.steps.push(s);
-    });
-
-    // build ordered list
-    const keys = new Set(map.keys());
-    const ordered: string[] = [];
-
-    sectionOrderFromInstructions.forEach((name) => {
-      if (keys.has(name)) {
-        ordered.push(name);
-        keys.delete(name);
+      if (m.bookmarkDelta != null && isOwner) {
+        setBookmarkCount((c) => Math.max(0, c + m.bookmarkDelta!));
       }
+      if (m.heartedByMe != null) setDidHeart(m.heartedByMe);
+      if (m.bookmarkedByMe != null) setDidSave(m.bookmarkedByMe);
     });
-    if (keys.has('Main') && !ordered.includes('Main')) {
-      ordered.unshift('Main');
-      keys.delete('Main');
-    }
-    const remaining = Array.from(keys).sort((a, b) => a.localeCompare(b));
-    ordered.push(...remaining);
-
-    return ordered.map((name) => ({ name, ...map.get(name)! }));
-  }, [ings, steps, sectionOrderFromInstructions]);
+    return unsubscribe;
+  }, [recipe, isOwner]);
 
   async function toggleHeart() {
     if (!currentUserId || !recipe || busyHeart) return;
@@ -259,24 +222,34 @@ export default function RecipeModal({
     const next = !didHeart;
     setDidHeart(next);
     setHeartCount((c) => Math.max(0, c + (next ? 1 : -1)));
+
+    emitRecipeMutation({
+      id: recipe.id,
+      heartDelta: next ? +1 : -1,
+      heartedByMe: next,
+    });
+
     try {
       if (next) {
-        const { error } = await supabase.from('recipe_hearts').insert({
+        await supabase.from('recipe_hearts').insert({
           recipe_id: recipe.id,
           user_id: currentUserId,
         });
-        if (error) throw error;
       } else {
-        const { error } = await supabase
+        await supabase
           .from('recipe_hearts')
           .delete()
           .eq('recipe_id', recipe.id)
           .eq('user_id', currentUserId);
-        if (error) throw error;
       }
     } catch {
       setDidHeart(!next);
       setHeartCount((c) => Math.max(0, c + (next ? -1 : 1)));
+      emitRecipeMutation({
+        id: recipe.id,
+        heartDelta: next ? -1 : +1,
+        heartedByMe: !next,
+      });
     } finally {
       setBusyHeart(false);
     }
@@ -288,24 +261,34 @@ export default function RecipeModal({
     const next = !didSave;
     setDidSave(next);
     if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? 1 : -1)));
+
+    emitRecipeMutation({
+      id: recipe.id,
+      bookmarkDelta: next ? +1 : -1,
+      bookmarkedByMe: next,
+    });
+
     try {
       if (next) {
-        const { error } = await supabase.from('recipe_bookmarks').insert({
+        await supabase.from('recipe_bookmarks').insert({
           recipe_id: recipe.id,
           user_id: currentUserId,
         });
-        if (error) throw error;
       } else {
-        const { error } = await supabase
+        await supabase
           .from('recipe_bookmarks')
           .delete()
           .eq('recipe_id', recipe.id)
           .eq('user_id', currentUserId);
-        if (error) throw error;
       }
     } catch {
       setDidSave(!next);
       if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? -1 : 1)));
+      emitRecipeMutation({
+        id: recipe.id,
+        bookmarkDelta: next ? -1 : +1,
+        bookmarkedByMe: !next,
+      });
     } finally {
       setBusySave(false);
     }
@@ -343,7 +326,7 @@ export default function RecipeModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* FIXED HEADER */}
+        {/* Header */}
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
           <div
             style={{
@@ -450,7 +433,7 @@ export default function RecipeModal({
           </div>
         </div>
 
-        {/* SCROLLABLE: image + body */}
+        {/* Scrollable body */}
         <div
           style={{
             overflowY: 'auto',
@@ -482,68 +465,32 @@ export default function RecipeModal({
               <div style={{ color: '#666' }}>{fullRecipe?.cuisine || ''}</div>
             </div>
 
-            {/* INGREDIENTS grouped under one heading */}
+            {/* Ingredients */}
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>Ingredients:</div>
               {loading ? (
                 <div>Loading…</div>
               ) : (
-                sections.map((sec) => {
-                  const hideLabel = sections.length === 1 && sec.name === 'Main';
-                  return (
-                    <div key={`ing-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
-                      {!hideLabel && <div style={{ fontWeight: 600 }}>{sec.name}</div>}
-                      {sec.ingredients.length > 0 ? (
-                        <ul style={{ paddingLeft: 18, margin: 0 }}>
-                          {sec.ingredients.map((i, idx) => {
-                            const qty = i.quantity ?? '';
-                            const parts = [qty, i.unit, i.item_name]
-                              .filter(Boolean)
-                              .join(' ');
-                            return (
-                              <li key={idx}>
-                                {parts}
-                                {i.note ? ` (${i.note})` : ''}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      ) : (
-                        <div style={{ color: '#6b7280', fontSize: 13 }}>
-                          No ingredients.
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+                ings.map((i, idx) => (
+                  <div key={idx}>
+                    {i.quantity ?? ''} {i.unit ?? ''} {i.item_name}
+                    {i.note ? ` (${i.note})` : ''}
+                  </div>
+                ))
               )}
             </div>
 
-            {/* INSTRUCTIONS grouped under one heading */}
+            {/* Instructions */}
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>Instructions:</div>
               {loading ? (
                 <div>Loading…</div>
               ) : (
-                sections.map((sec) => {
-                  const hideLabel = sections.length === 1 && sec.name === 'Main';
-                  return (
-                    <div key={`steps-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
-                      {!hideLabel && <div style={{ fontWeight: 600 }}>{sec.name}</div>}
-                      {sec.steps.length > 0 ? (
-                        <ol style={{ paddingLeft: 20, margin: 0 }}>
-                          {sec.steps.map((s, idx) => (
-                            <li key={idx}>{s.body}</li>
-                          ))}
-                        </ol>
-                      ) : (
-                        <div style={{ color: '#6b7280', fontSize: 13 }}>
-                          No instructions.
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
+                steps.map((s, idx) => (
+                  <div key={idx}>
+                    {s.step_number}. {s.body}
+                  </div>
+                ))
               )}
             </div>
 
@@ -560,7 +507,7 @@ export default function RecipeModal({
           </div>
         </div>
 
-        {/* FIXED FOOTER */}
+        {/* Footer */}
         <div
           style={{
             padding: '6px 16px',
@@ -605,56 +552,4 @@ export default function RecipeModal({
                 strokeWidth="2"
               >
                 <path d="M12 21c-4.8-3.7-8-6.4-8-10a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 3.6-3.2 6.3-8 10z" />
-              </svg>
-              <span style={{ fontSize: 14 }}>{heartCount}</span>
-            </button>
-
-            {/* Bookmark */}
-            <button
-              onClick={toggleSave}
-              disabled={!currentUserId || busySave}
-              style={{
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                cursor: !currentUserId || busySave ? 'not-allowed' : 'pointer',
-                color: didSave ? '#2563eb' : '#374151',
-                opacity: !currentUserId || busySave ? 0.6 : 1,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}
-              aria-label={didSave ? 'Remove bookmark' : 'Add bookmark'}
-              title={didSave ? 'Remove bookmark' : 'Add bookmark'}
-            >
-              {didSave ? (
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
-                </svg>
-              ) : (
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="24"
-                  height="24"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
-                </svg>
-              )}
-              {isOwner ? <span style={{ fontSize: 14 }}>{bookmarkCount}</span> : null}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+              </svg
