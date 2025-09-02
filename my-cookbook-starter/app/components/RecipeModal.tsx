@@ -2,10 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import {
-  emitRecipeMutation,
-  subscribeRecipeMutations,
-} from '@/lib/recipeSync';
+import { emitRecipeMutation, subscribeRecipeMutations } from '@/lib/recipeSync'; // ✅ ADDED
 
 type Recipe = {
   id: string;
@@ -15,7 +12,7 @@ type Recipe = {
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
-  instructions?: string | null;
+  instructions?: string | null; // used to infer component order
 };
 
 type StepRow = { step_number: number; body: string; section_label: string | null };
@@ -113,7 +110,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setCurrentUserId(uid);
 
-      // fetch latest core
+      // fetch latest core (for instructions)
       const { data: rRow } = await supabase
         .from('recipes')
         .select('id,user_id,title,cuisine,photo_url,source_url,created_at,instructions')
@@ -148,7 +145,7 @@ export default function RecipeModal({
       setSteps((stepData as StepRow[]) || []);
       setIngs((ingData as IngredientRow[]) || []);
 
-      // hearts/bookmarks
+      // hearts/bookmarks (⚠️ keep your original table names)
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
@@ -198,7 +195,7 @@ export default function RecipeModal({
     };
   }, [open, recipe]);
 
-  // subscribe to sync messages
+  // ✅ subscribe to cross-component sync messages (Friends feed / other modals)
   useEffect(() => {
     if (!recipe) return;
     const unsubscribe = subscribeRecipeMutations((m) => {
@@ -216,40 +213,36 @@ export default function RecipeModal({
     return unsubscribe;
   }, [recipe, isOwner]);
 
+  // ✅ emit sync messages when toggling (and rollback on failure)
   async function toggleHeart() {
     if (!currentUserId || !recipe || busyHeart) return;
     setBusyHeart(true);
     const next = !didHeart;
+    // optimistic
     setDidHeart(next);
     setHeartCount((c) => Math.max(0, c + (next ? 1 : -1)));
-
-    emitRecipeMutation({
-      id: recipe.id,
-      heartDelta: next ? +1 : -1,
-      heartedByMe: next,
-    });
+    emitRecipeMutation({ id: recipe.id, heartDelta: next ? +1 : -1, heartedByMe: next });
 
     try {
       if (next) {
-        await supabase.from('recipe_hearts').insert({
+        const { error } = await supabase.from('recipe_hearts').insert({
           recipe_id: recipe.id,
           user_id: currentUserId,
         });
+        if (error) throw error;
       } else {
-        await supabase
+        const { error } = await supabase
           .from('recipe_hearts')
           .delete()
           .eq('recipe_id', recipe.id)
           .eq('user_id', currentUserId);
+        if (error) throw error;
       }
     } catch {
+      // rollback
       setDidHeart(!next);
       setHeartCount((c) => Math.max(0, c + (next ? -1 : 1)));
-      emitRecipeMutation({
-        id: recipe.id,
-        heartDelta: next ? -1 : +1,
-        heartedByMe: !next,
-      });
+      emitRecipeMutation({ id: recipe.id, heartDelta: next ? -1 : +1, heartedByMe: !next });
     } finally {
       setBusyHeart(false);
     }
@@ -259,36 +252,31 @@ export default function RecipeModal({
     if (!currentUserId || !recipe || busySave) return;
     setBusySave(true);
     const next = !didSave;
+    // optimistic
     setDidSave(next);
     if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? 1 : -1)));
-
-    emitRecipeMutation({
-      id: recipe.id,
-      bookmarkDelta: next ? +1 : -1,
-      bookmarkedByMe: next,
-    });
+    emitRecipeMutation({ id: recipe.id, bookmarkDelta: next ? +1 : -1, bookmarkedByMe: next });
 
     try {
       if (next) {
-        await supabase.from('recipe_bookmarks').insert({
+        const { error } = await supabase.from('recipe_bookmarks').insert({
           recipe_id: recipe.id,
           user_id: currentUserId,
         });
+        if (error) throw error;
       } else {
-        await supabase
+        const { error } = await supabase
           .from('recipe_bookmarks')
           .delete()
           .eq('recipe_id', recipe.id)
           .eq('user_id', currentUserId);
+        if (error) throw error;
       }
     } catch {
+      // rollback
       setDidSave(!next);
       if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? -1 : 1)));
-      emitRecipeMutation({
-        id: recipe.id,
-        bookmarkDelta: next ? -1 : +1,
-        bookmarkedByMe: !next,
-      });
+      emitRecipeMutation({ id: recipe.id, bookmarkDelta: next ? -1 : +1, bookmarkedByMe: !next });
     } finally {
       setBusySave(false);
     }
@@ -296,6 +284,65 @@ export default function RecipeModal({
 
   if (!open || !recipe) return null;
   const authorName = author?.display_name || author?.nickname || 'Unknown user';
+
+  // parse creation order from instructions headings ("Name:")
+  const sectionOrderFromInstructions = useMemo(() => {
+    const order: string[] = [];
+    const seen = new Set<string>();
+    const lines = (fullRecipe?.instructions || '').split('\n');
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.endsWith(':')) {
+        const name = line.slice(0, -1).trim();
+        const normalized = name || 'Main';
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          order.push(normalized);
+        }
+      }
+    }
+    return order;
+  }, [fullRecipe?.instructions]);
+
+  // group by section, maintain order
+  const sections = useMemo(() => {
+    type Sec = { ingredients: IngredientRow[]; steps: StepRow[] };
+    const map = new Map<string, Sec>();
+    const add = (key: string) => {
+      if (!map.has(key)) map.set(key, { ingredients: [], steps: [] });
+    };
+
+    ings.forEach((i) => {
+      const key = (i.section_label || 'Main').trim() || 'Main';
+      add(key);
+      map.get(key)!.ingredients.push(i);
+    });
+    steps.forEach((s) => {
+      const key = (s.section_label || 'Main').trim() || 'Main';
+      add(key);
+      map.get(key)!.steps.push(s);
+    });
+
+    // build ordered list
+    const keys = new Set(map.keys());
+    const ordered: string[] = [];
+
+    sectionOrderFromInstructions.forEach((name) => {
+      if (keys.has(name)) {
+        ordered.push(name);
+        keys.delete(name);
+      }
+    });
+    if (keys.has('Main') && !ordered.includes('Main')) {
+      ordered.unshift('Main');
+      keys.delete('Main');
+    }
+    const remaining = Array.from(keys).sort((a, b) => a.localeCompare(b));
+    ordered.push(...remaining);
+
+    return ordered.map((name) => ({ name, ...map.get(name)! }));
+  }, [ings, steps, sectionOrderFromInstructions]);
 
   return (
     <div
@@ -326,7 +373,7 @@ export default function RecipeModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* FIXED HEADER */}
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
           <div
             style={{
@@ -433,7 +480,7 @@ export default function RecipeModal({
           </div>
         </div>
 
-        {/* Scrollable body */}
+        {/* SCROLLABLE: image + body */}
         <div
           style={{
             overflowY: 'auto',
@@ -465,32 +512,68 @@ export default function RecipeModal({
               <div style={{ color: '#666' }}>{fullRecipe?.cuisine || ''}</div>
             </div>
 
-            {/* Ingredients */}
+            {/* INGREDIENTS grouped under one heading */}
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>Ingredients:</div>
               {loading ? (
                 <div>Loading…</div>
               ) : (
-                ings.map((i, idx) => (
-                  <div key={idx}>
-                    {i.quantity ?? ''} {i.unit ?? ''} {i.item_name}
-                    {i.note ? ` (${i.note})` : ''}
-                  </div>
-                ))
+                sections.map((sec) => {
+                  const hideLabel = sections.length === 1 && sec.name === 'Main';
+                  return (
+                    <div key={`ing-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
+                      {!hideLabel && <div style={{ fontWeight: 600 }}>{sec.name}</div>}
+                      {sec.ingredients.length > 0 ? (
+                        <ul style={{ paddingLeft: 18, margin: 0 }}>
+                          {sec.ingredients.map((i, idx) => {
+                            const qty = i.quantity ?? '';
+                            const parts = [qty, i.unit, i.item_name]
+                              .filter(Boolean)
+                              .join(' ');
+                            return (
+                              <li key={idx}>
+                                {parts}
+                                {i.note ? ` (${i.note})` : ''}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        <div style={{ color: '#6b7280', fontSize: 13 }}>
+                          No ingredients.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
 
-            {/* Instructions */}
+            {/* INSTRUCTIONS grouped under one heading */}
             <div style={{ display: 'grid', gap: 10 }}>
               <div style={{ fontWeight: 700, fontSize: 16 }}>Instructions:</div>
               {loading ? (
                 <div>Loading…</div>
               ) : (
-                steps.map((s, idx) => (
-                  <div key={idx}>
-                    {s.step_number}. {s.body}
-                  </div>
-                ))
+                sections.map((sec) => {
+                  const hideLabel = sections.length === 1 && sec.name === 'Main';
+                  return (
+                    <div key={`steps-${sec.name}`} style={{ display: 'grid', gap: 4 }}>
+                      {!hideLabel && <div style={{ fontWeight: 600 }}>{sec.name}</div>}
+                      {sec.steps.length > 0 ? (
+                        <ol style={{ paddingLeft: 20, margin: 0 }}>
+                          {sec.steps.map((s, idx) => (
+                            <li key={idx}>{s.body}</li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <div style={{ color: '#6b7280', fontSize: 13 }}>
+                          No instructions.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               )}
             </div>
 
@@ -507,7 +590,7 @@ export default function RecipeModal({
           </div>
         </div>
 
-        {/* Footer */}
+        {/* FIXED FOOTER */}
         <div
           style={{
             padding: '6px 16px',
@@ -552,4 +635,56 @@ export default function RecipeModal({
                 strokeWidth="2"
               >
                 <path d="M12 21c-4.8-3.7-8-6.4-8-10a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 3.6-3.2 6.3-8 10z" />
-              </svg
+              </svg>
+              <span style={{ fontSize: 14 }}>{heartCount}</span>
+            </button>
+
+            {/* Bookmark */}
+            <button
+              onClick={toggleSave}
+              disabled={!currentUserId || busySave}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                cursor: !currentUserId || busySave ? 'not-allowed' : 'pointer',
+                color: didSave ? '#2563eb' : '#374151',
+                opacity: !currentUserId || busySave ? 0.6 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              aria-label={didSave ? 'Remove bookmark' : 'Add bookmark'}
+              title={didSave ? 'Remove bookmark' : 'Add bookmark'}
+            >
+              {didSave ? (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
+                </svg>
+              ) : (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M6 2h12a1 1 0 0 1 1 1v19l-7-4-7 4V3a1 1 0 0 1 1-1z" />
+                </svg>
+              )}
+              {isOwner ? <span style={{ fontSize: 14 }}>{bookmarkCount}</span> : null}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
