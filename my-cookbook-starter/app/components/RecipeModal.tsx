@@ -1,9 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-// ⛔️ removed static import of recipeSync to avoid any import/SSR pitfalls
-// import { emitRecipeMutation, subscribeRecipeMutations } from '@/lib/recipeSync';
 
 type Recipe = {
   id: string;
@@ -33,7 +31,6 @@ type Profile = {
   avatar_url: string | null;
 };
 
-// ---------- helpers (unchanged) ----------
 function isSameLocalDate(a: Date, b: Date) {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -89,49 +86,6 @@ export default function RecipeModal({
       : `Added on ${formatMonthDayYearWithComma(created)}`;
   }, [fullRecipe?.created_at]);
 
-  // --------- NEW: dynamic event-bus import (one-time, client only) ----------
-  type Bus = {
-    emitRecipeMutation: (m: {
-      id: string;
-      heartDelta?: number;
-      bookmarkDelta?: number;
-      heartedByMe?: boolean;
-      bookmarkedByMe?: boolean;
-    }) => void;
-    subscribeRecipeMutations: (
-      h: (m: {
-        id: string;
-        heartDelta?: number;
-        bookmarkDelta?: number;
-        heartedByMe?: boolean;
-        bookmarkedByMe?: boolean;
-      }) => void
-    ) => () => void;
-  };
-  const busRef = useRef<Bus | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (typeof window === 'undefined') return;
-      try {
-        const mod = await import('@/lib/recipeSync'); // lazy load
-        if (!alive) return;
-        busRef.current = {
-          emitRecipeMutation: mod.emitRecipeMutation,
-          subscribeRecipeMutations: mod.subscribeRecipeMutations,
-        };
-      } catch (e) {
-        // don't crash if import fails
-        console.warn('[RecipeModal] recipeSync import failed', e);
-        busRef.current = null;
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
   // lock page scroll
   useEffect(() => {
     if (!open) return;
@@ -142,7 +96,7 @@ export default function RecipeModal({
     };
   }, [open]);
 
-  // load details (unchanged)
+  // load details
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -155,6 +109,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setCurrentUserId(uid);
 
+      // fetch latest core (for instructions)
       const { data: rRow } = await supabase
         .from('recipes')
         .select('id,user_id,title,cuisine,photo_url,source_url,created_at,instructions')
@@ -163,6 +118,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setFullRecipe((rRow as Recipe) ?? recipe);
 
+      // author
       const { data: profs } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url')
@@ -171,6 +127,7 @@ export default function RecipeModal({
       if (!mounted) return;
       setAuthor((profs?.[0] as Profile) ?? null);
 
+      // children
       const [{ data: stepData }, { data: ingData }] = await Promise.all([
         supabase
           .from('recipe_steps')
@@ -187,6 +144,7 @@ export default function RecipeModal({
       setSteps((stepData as StepRow[]) || []);
       setIngs((ingData as IngredientRow[]) || []);
 
+      // hearts/bookmarks
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
@@ -236,137 +194,6 @@ export default function RecipeModal({
     };
   }, [open, recipe]);
 
-  // subscription using the dynamically loaded bus
-  useEffect(() => {
-    if (!recipe) return;
-
-    const bus = busRef.current;
-    if (!bus || typeof bus.subscribeRecipeMutations !== 'function') {
-      // try again shortly in case the dynamic import hasn’t finished yet
-      const id = setTimeout(() => {
-        // trigger this effect again by touching a no-op state? cheaper: just return; user action will re-open
-      }, 0);
-      return () => clearTimeout(id);
-    }
-
-    const unsubscribe = bus.subscribeRecipeMutations((m) => {
-      try {
-        if (!recipe || m.id !== recipe.id) return;
-
-        if (typeof m.heartDelta === 'number') {
-          const delta = m.heartDelta;
-          setHeartCount((c) => Math.max(0, c + delta));
-        }
-        if (typeof m.bookmarkDelta === 'number' && isOwner) {
-          const delta = m.bookmarkDelta;
-          setBookmarkCount((c) => Math.max(0, c + delta));
-        }
-        if (typeof m.heartedByMe === 'boolean') setDidHeart(m.heartedByMe);
-        if (typeof m.bookmarkedByMe === 'boolean') setDidSave(m.bookmarkedByMe);
-      } catch {
-        // never crash UI
-      }
-    });
-
-    return unsubscribe;
-  }, [recipe?.id, isOwner]);
-
-  // emits using the dynamically loaded bus (guarded)
-  async function toggleHeart() {
-    if (!currentUserId || !recipe || busyHeart) return;
-    setBusyHeart(true);
-    const next = !didHeart;
-
-    setDidHeart(next);
-    setHeartCount((c) => Math.max(0, c + (next ? 1 : -1)));
-
-    try {
-      busRef.current?.emitRecipeMutation?.({
-        id: recipe.id,
-        heartDelta: next ? +1 : -1,
-        heartedByMe: next,
-      });
-    } catch {}
-
-    try {
-      if (next) {
-        const { error } = await supabase.from('recipe_hearts').insert({
-          recipe_id: recipe.id,
-          user_id: currentUserId,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('recipe_hearts')
-          .delete()
-          .eq('recipe_id', recipe.id)
-          .eq('user_id', currentUserId);
-        if (error) throw error;
-      }
-    } catch {
-      setDidHeart(!next);
-      setHeartCount((c) => Math.max(0, c + (next ? -1 : 1)));
-      try {
-        busRef.current?.emitRecipeMutation?.({
-          id: recipe.id,
-          heartDelta: next ? -1 : +1,
-          heartedByMe: !next,
-        });
-      } catch {}
-    } finally {
-      setBusyHeart(false);
-    }
-  }
-
-  async function toggleSave() {
-    if (!currentUserId || !recipe || busySave) return;
-    setBusySave(true);
-    const next = !didSave;
-
-    setDidSave(next);
-    if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? 1 : -1)));
-
-    try {
-      busRef.current?.emitRecipeMutation?.({
-        id: recipe.id,
-        bookmarkDelta: next ? +1 : -1,
-        bookmarkedByMe: next,
-      });
-    } catch {}
-
-    try {
-      if (next) {
-        const { error } = await supabase.from('recipe_bookmarks').insert({
-          recipe_id: recipe.id,
-          user_id: currentUserId,
-        });
-        if (error) throw error;
-      } else {
-        const { error } = await supabase
-          .from('recipe_bookmarks')
-          .delete()
-          .eq('recipe_id', recipe.id)
-          .eq('user_id', currentUserId);
-        if (error) throw error;
-      }
-    } catch {
-      setDidSave(!next);
-      if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? -1 : 1)));
-      try {
-        busRef.current?.emitRecipeMutation?.({
-          id: recipe.id,
-          bookmarkDelta: next ? -1 : +1,
-          bookmarkedByMe: !next,
-        });
-      } catch {}
-    } finally {
-      setBusySave(false);
-    }
-  }
-
-  if (!open || !recipe) return null;
-  const authorName = author?.display_name || author?.nickname || 'Unknown user';
-
   // parse creation order from instructions headings ("Name:")
   const sectionOrderFromInstructions = useMemo(() => {
     const order: string[] = [];
@@ -406,6 +233,7 @@ export default function RecipeModal({
       map.get(key)!.steps.push(s);
     });
 
+    // build ordered list
     const keys = new Set(map.keys());
     const ordered: string[] = [];
 
@@ -424,6 +252,67 @@ export default function RecipeModal({
 
     return ordered.map((name) => ({ name, ...map.get(name)! }));
   }, [ings, steps, sectionOrderFromInstructions]);
+
+  async function toggleHeart() {
+    if (!currentUserId || !recipe || busyHeart) return;
+    setBusyHeart(true);
+    const next = !didHeart;
+    setDidHeart(next);
+    setHeartCount((c) => Math.max(0, c + (next ? 1 : -1)));
+    try {
+      if (next) {
+        const { error } = await supabase.from('recipe_hearts').insert({
+          recipe_id: recipe.id,
+          user_id: currentUserId,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('recipe_hearts')
+          .delete()
+          .eq('recipe_id', recipe.id)
+          .eq('user_id', currentUserId);
+        if (error) throw error;
+      }
+    } catch {
+      setDidHeart(!next);
+      setHeartCount((c) => Math.max(0, c + (next ? -1 : 1)));
+    } finally {
+      setBusyHeart(false);
+    }
+  }
+
+  async function toggleSave() {
+    if (!currentUserId || !recipe || busySave) return;
+    setBusySave(true);
+    const next = !didSave;
+    setDidSave(next);
+    if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? 1 : -1)));
+    try {
+      if (next) {
+        const { error } = await supabase.from('recipe_bookmarks').insert({
+          recipe_id: recipe.id,
+          user_id: currentUserId,
+        });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from('recipe_bookmarks')
+          .delete()
+          .eq('recipe_id', recipe.id)
+          .eq('user_id', currentUserId);
+        if (error) throw error;
+      }
+    } catch {
+      setDidSave(!next);
+      if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? -1 : 1)));
+    } finally {
+      setBusySave(false);
+    }
+  }
+
+  if (!open || !recipe) return null;
+  const authorName = author?.display_name || author?.nickname || 'Unknown user';
 
   return (
     <div
