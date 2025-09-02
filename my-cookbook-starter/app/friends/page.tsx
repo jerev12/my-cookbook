@@ -3,174 +3,182 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeModal from '../components/RecipeModal';
+import RecipeModal from '../components/RecipeModal'; // mirrors your public feed import
+
+// Match your existing Recipe type from the public feed
+type Recipe = {
+  id: string;
+  user_id: string;
+  title: string;
+  cuisine: string | null;
+  recipe_types: string[] | null;
+  photo_url: string | null;
+  source_url: string | null;
+  created_at: string | null;
+  visibility?: string | null;
+  // we'll attach the author's profile after fetching:
+  _profile?: Profile | null;
+};
 
 type Profile = {
-  id: string | null;
+  id: string;
   display_name: string | null;
   avatar_url: string | null;
 };
 
-type RecipeRow = {
-  id: string;
-  user_id: string;
-  title: string;
-  recipes_types: string | null;
-  photo_url: string | null;
-  privacy: 'public' | 'friends' | 'private';
-  created_at: string;
-  profiles?: Profile | null; // single object after normalization
-};
-
 const PAGE_SIZE = 12;
 
-export default function FriendsPage() {
+export default function FriendsFeed() {
   const [userId, setUserId] = useState<string | null>(null);
   const [friendIds, setFriendIds] = useState<string[]>([]);
-  const [recipes, setRecipes] = useState<RecipeRow[]>([]);
+  const [rows, setRows] = useState<Recipe[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeRecipe, setActiveRecipe] = useState<RecipeRow | null>(null);
+  // modal state (mirror your public page)
+  const [selected, setSelected] = useState<Recipe | null>(null);
+  const [open, setOpen] = useState(false);
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Get current user id
   useEffect(() => {
+    let mounted = true;
     (async () => {
       const { data, error } = await supabase.auth.getUser();
+      if (!mounted) return;
       if (error) {
-        setErrorMsg(error.message);
-        return;
+        setMsg(error.message);
+      } else {
+        setUserId(data.user?.id ?? null);
       }
-      setUserId(data.user?.id ?? null);
     })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Fetch friend ids (accepted, either direction)
+  // Fetch friend ids (accepted either direction)
   useEffect(() => {
     if (!userId) return;
+    let mounted = true;
     (async () => {
       const { data, error } = await supabase
         .from('friendships')
         .select('requester_id, addressee_id')
         .eq('status', 'accepted')
         .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+      if (!mounted) return;
 
       if (error) {
-        setErrorMsg(error.message);
-        return;
+        setMsg(error.message);
+        setFriendIds([]);
+      } else {
+        const ids =
+          data?.map((row) =>
+            row.requester_id === userId ? row.addressee_id : row.requester_id
+          ) ?? [];
+        setFriendIds(ids);
       }
-
-      const ids =
-        data?.map((row) =>
-          row.requester_id === userId ? row.addressee_id : row.requester_id
-        ) ?? [];
-
-      setFriendIds(ids);
     })();
+    return () => {
+      mounted = false;
+    };
   }, [userId]);
 
-  // Only fetch from you + friends (not public from everyone)
+  // Users whose recipes we consider: you + your friends
   const visibleUserIds = useMemo(() => {
     return userId ? [userId, ...friendIds] : friendIds;
   }, [userId, friendIds]);
 
+  // Fetch profiles for a set of userIds
+  const fetchProfiles = useCallback(async (userIds: string[]) => {
+    if (!userIds.length) return new Map<string, Profile>();
+    const uniq = Array.from(new Set(userIds));
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, display_name, avatar_url')
+      .in('id', uniq);
+
+    if (error) throw error;
+
+    const m = new Map<string, Profile>();
+    (data ?? []).forEach((p) => m.set(p.id, p as Profile));
+    return m;
+  }, []);
+
+  // Fetch one page (recipes only, then profiles; no relational join)
   const fetchPage = useCallback(
     async (nextPage: number) => {
+      // If we don't know the current user and also have no friends, nothing to do
       if (!userId && visibleUserIds.length === 0) return;
 
       setLoading(true);
-      setErrorMsg(null);
+      setMsg(null);
       try {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // Using FK-qualified join; if FK name differs, Supabase may still return an array—handled below.
-        const { data, error } = await supabase
+        // 1) Pull recipes for you + friends
+        const { data: recipeRows, error: recipeErr } = await supabase
           .from('recipes')
           .select(
-            `
-              id,
-              user_id,
-              title,
-              recipes_types,
-              photo_url,
-              privacy,
-              created_at,
-              profiles:profiles!recipes_user_id_fkey (
-                id,
-                display_name,
-                avatar_url
-              )
-            `
+            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
           )
           .in(
             'user_id',
             visibleUserIds.length
               ? visibleUserIds
-              : ['00000000-0000-0000-0000-000000000000']
+              : ['00000000-0000-0000-0000-000000000000'] // guard for empty in()
           )
           .order('created_at', { ascending: false })
           .range(from, to);
 
-        if (error) throw error;
+        if (recipeErr) throw recipeErr;
 
-        // ---- Normalize: collapse profiles array → single object (or null) ----
-        const normalized: RecipeRow[] = (data ?? []).map((r: any) => {
-          let prof = r.profiles ?? null;
-          if (Array.isArray(prof)) prof = prof[0] ?? null;
-          return {
-            id: r.id,
-            user_id: r.user_id,
-            title: r.title,
-            recipes_types: r.recipes_types ?? null,
-            photo_url: r.photo_url ?? null,
-            privacy: r.privacy,
-            created_at: r.created_at,
-            profiles: prof
-              ? {
-                  id: prof.id ?? null,
-                  display_name: prof.display_name ?? null,
-                  avatar_url: prof.avatar_url ?? null,
-                }
-              : null,
-          };
-        });
-
-        // Filter client-side: always show your own; for friends allow public + friends
-        const filtered = normalized.filter((r) => {
+        // 2) Apply visibility rules client-side:
+        // - Your own recipes: show regardless of visibility
+        // - Friends' recipes: only show if visibility IN ('public','friends')
+        const filtered: Recipe[] = (recipeRows as Recipe[] | null)?.filter((r) => {
           if (r.user_id === userId) return true;
-          return r.privacy === 'public' || r.privacy === 'friends';
-        });
+          const vis = (r.visibility ?? '').toLowerCase();
+          return vis === 'public' || vis === 'friends';
+        }) ?? [];
 
-        const gotAll = (data?.length ?? 0) < PAGE_SIZE;
+        // 3) Fetch needed profiles and attach
+        const neededIds = filtered.map((r) => r.user_id);
+        const profilesMap = await fetchProfiles(neededIds);
+        const withProfiles: Recipe[] = filtered.map((r) => ({
+          ...r,
+          _profile: profilesMap.get(r.user_id) ?? null,
+        }));
 
-        setRecipes((prev) => [...prev, ...filtered]);
+        // 4) Append to rows
+        const gotAll = (recipeRows?.length ?? 0) < PAGE_SIZE;
+        setRows((prev) => [...prev, ...withProfiles]);
         setHasMore(!gotAll);
         setPage(nextPage);
       } catch (e: any) {
-        setErrorMsg(e.message ?? 'Failed to load feed.');
+        setMsg(e.message ?? 'Failed to load friends feed.');
       } finally {
         setLoading(false);
       }
     },
-    [userId, visibleUserIds]
+    [userId, visibleUserIds, fetchProfiles]
   );
 
-  // Initial load / reload when friends set changes
+  // Initial load when we have the userId/friends list
   useEffect(() => {
-    if (!userId) return;
-    setRecipes([]);
+    if (!userId) return; // wait for auth
+    setRows([]);
     setPage(0);
     setHasMore(true);
     fetchPage(0);
   }, [userId, friendIds.join('|'), fetchPage]);
 
-  // Infinite scroll observer
+  // Infinite scroll
   useEffect(() => {
     if (!hasMore || loading) return;
     const el = sentinelRef.current;
@@ -190,67 +198,71 @@ export default function FriendsPage() {
     return () => io.disconnect();
   }, [hasMore, loading, page, fetchPage]);
 
-  const handleOpen = (recipe: RecipeRow) => {
-    setActiveRecipe(recipe);
-    setIsModalOpen(true);
-  };
-
-  const handleClose = () => {
-    setIsModalOpen(false);
-    setActiveRecipe(null);
-  };
+  function openRecipe(r: Recipe) {
+    setSelected(r);
+    setOpen(true);
+  }
+  function closeRecipe() {
+    setOpen(false);
+    setSelected(null);
+  }
 
   return (
     <main className="w-full flex justify-center">
       <div className="w-full max-w-[420px]">
         {/* Header */}
         <div className="px-4 py-3 border-b border-neutral-200">
-          <h1 className="text-xl font-semibold">Friends</h1>
-          <p className="text-sm text-neutral-500">
+          <h1 className="text-xl font-semibold m-0">Friends</h1>
+          <p className="text-sm text-neutral-500 m-0">
             Your recipes + friends’ recipes (public & friends-only)
           </p>
         </div>
 
-        {/* Error */}
-        {errorMsg && (
+        {/* Messages */}
+        {msg && (
           <div className="m-4 rounded-md bg-red-50 p-3 text-sm text-red-700 border border-red-200">
-            {errorMsg}
+            {msg}
           </div>
         )}
 
         {/* Empty state */}
-        {!loading && recipes.length === 0 && (
-          <div className="px-4 py-12 text-center text-neutral-500">
+        {!loading && rows.length === 0 && !msg && (
+          <div
+            style={{
+              background: '#fff',
+              border: '1px solid #eee',
+              borderRadius: 12,
+              padding: 16,
+              color: '#606375',
+              margin: 16,
+            }}
+          >
             No recipes to show yet.
           </div>
         )}
 
-        {/* Feed */}
-        <div className="flex flex-col divide-y divide-neutral-200">
-          {recipes.map((r) => (
-            <article key={r.id} className="pt-4">
-              {/* Post header */}
+        {/* Feed (single column IG style) */}
+        <div className="flex flex-col">
+          {rows.map((r) => (
+            <article key={r.id} className="pt-4 border-b border-neutral-200">
+              {/* Row header with avatar + display name */}
               <div className="px-4 pb-3 flex items-center gap-3">
                 <Avatar
-                  src={r.profiles?.avatar_url ?? null}
-                  name={r.profiles?.display_name ?? 'User'}
+                  src={r._profile?.avatar_url ?? null}
+                  name={r._profile?.display_name ?? 'User'}
                 />
                 <div className="flex flex-col leading-tight">
                   <span className="font-medium">
-                    {r.profiles?.display_name ?? 'Unknown User'}
+                    {r._profile?.display_name ?? 'Unknown User'}
                   </span>
                 </div>
               </div>
 
-              {/* Image + overlay */}
+              {/* Image with overlay (title + types) */}
               <div className="px-0">
-                <div
-                  className="relative w-full overflow-hidden"
-                  style={{ aspectRatio: '4 / 3' }}
-                >
-                  {/* Clickable image */}
+                <div className="relative w-full overflow-hidden" style={{ aspectRatio: '4 / 3' }}>
                   <button
-                    onClick={() => handleOpen(r)}
+                    onClick={() => openRecipe(r)}
                     className="absolute inset-0"
                     aria-label={`Open ${r.title}`}
                   />
@@ -267,18 +279,17 @@ export default function FriendsPage() {
                     <div className="absolute inset-0 bg-neutral-200" />
                   )}
 
-                  {/* Shaded overlay with title + type (clickable) */}
                   <div className="absolute bottom-2 left-2 right-2">
                     <button
-                      onClick={() => handleOpen(r)}
+                      onClick={() => openRecipe(r)}
                       className="rounded-md bg-black/60 backdrop-blur-[2px] px-3 py-2 text-left w-fit max-w-full"
                     >
                       <h3 className="text-white font-semibold leading-snug line-clamp-2">
                         {r.title}
                       </h3>
-                      {r.recipes_types && (
+                      {!!(r.recipe_types?.length) && (
                         <p className="text-white/90 text-xs uppercase mt-0.5 truncate">
-                          {r.recipes_types}
+                          {r.recipe_types.join(' • ')}
                         </p>
                       )}
                     </button>
@@ -286,13 +297,12 @@ export default function FriendsPage() {
                 </div>
               </div>
 
-              {/* Bottom spacer like IG */}
               <div className="h-2" />
             </article>
           ))}
 
-          {/* Skeletons */}
-          {loading && recipes.length === 0 && (
+          {/* Skeletons for initial load */}
+          {loading && rows.length === 0 && (
             <div className="p-4">
               {[...Array(3)].map((_, i) => (
                 <div key={i} className="mb-6">
@@ -300,10 +310,7 @@ export default function FriendsPage() {
                     <div className="w-10 h-10 rounded-full bg-neutral-200" />
                     <div className="h-3 w-32 bg-neutral-200 rounded" />
                   </div>
-                  <div
-                    className="w-full rounded-md bg-neutral-200"
-                    style={{ aspectRatio: '4 / 3' }}
-                  />
+                  <div className="w-full rounded-md bg-neutral-200" style={{ aspectRatio: '4 / 3' }} />
                 </div>
               ))}
             </div>
@@ -313,38 +320,29 @@ export default function FriendsPage() {
         {/* Infinite scroll sentinel */}
         <div ref={sentinelRef} className="h-12" />
 
-        {/* Modal */}
-        {isModalOpen && (
-          <RecipeModal
-            open={isModalOpen}
-            onClose={handleClose}
-            // If your RecipeModal exports its Recipe type, you can type this properly.
-            // For now, pass the object we have (structurally compatible) and tighten later if desired.
-            recipe={activeRecipe as any}
-          />
-        )}
+        {/* Shared modal (same contract as your public page) */}
+        <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
       </div>
     </main>
   );
 }
 
-/** Minimal avatar with fallback initials */
+/** Minimal avatar with initials fallback (no external component needed) */
 function Avatar({ src, name }: { src: string | null; name: string }) {
-  const initials = useMemo(() => {
-    const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
-    return (
-      parts
-        .slice(0, 2)
-        .map((p) => p[0]?.toUpperCase() ?? '')
-        .join('') || 'U'
-    );
-  }, [name]);
+  const initials =
+    (name ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase() ?? '')
+      .join('') || 'U';
 
   return src ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
-      alt={name}
+      alt={name ?? 'User'}
       className="w-10 h-10 rounded-full object-cover border border-neutral-200"
     />
   ) : (
