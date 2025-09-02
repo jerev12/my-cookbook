@@ -34,7 +34,7 @@ export default function FriendsPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeRecipeId, setActiveRecipeId] = useState<string | null>(null);
+  const [activeRecipe, setActiveRecipe] = useState<RecipeRow | null>(null);
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -119,7 +119,7 @@ export default function FriendsPage() {
 
         if (error) throw error;
 
-        // ---- Normalization step (handles array/object/null for profiles) ----
+        // ---- Normalize: collapse profiles array → single object (or null) ----
         const normalized: RecipeRow[] = (data ?? []).map((r: any) => {
           let prof = r.profiles ?? null;
           if (Array.isArray(prof)) prof = prof[0] ?? null;
@@ -190,14 +190,14 @@ export default function FriendsPage() {
     return () => io.disconnect();
   }, [hasMore, loading, page, fetchPage]);
 
-  const handleOpen = (id: string) => {
-    setActiveRecipeId(id);
+  const handleOpen = (recipe: RecipeRow) => {
+    setActiveRecipe(recipe);
     setIsModalOpen(true);
   };
 
   const handleClose = () => {
     setIsModalOpen(false);
-    setActiveRecipeId(null);
+    setActiveRecipe(null);
   };
 
   return (
@@ -250,7 +250,7 @@ export default function FriendsPage() {
                 >
                   {/* Clickable image */}
                   <button
-                    onClick={() => handleOpen(r.id)}
+                    onClick={() => handleOpen(r)}
                     className="absolute inset-0"
                     aria-label={`Open ${r.title}`}
                   />
@@ -270,7 +270,7 @@ export default function FriendsPage() {
                   {/* Shaded overlay with title + type (clickable) */}
                   <div className="absolute bottom-2 left-2 right-2">
                     <button
-                      onClick={() => handleOpen(r.id)}
+                      onClick={() => handleOpen(r)}
                       className="rounded-md bg-black/60 backdrop-blur-[2px] px-3 py-2 text-left w-fit max-w-full"
                     >
                       <h3 className="text-white font-semibold leading-snug line-clamp-2">
@@ -314,11 +314,13 @@ export default function FriendsPage() {
         <div ref={sentinelRef} className="h-12" />
 
         {/* Modal */}
-        {activeRecipeId && (
+        {isModalOpen && (
           <RecipeModal
             open={isModalOpen}
             onClose={handleClose}
-            recipeId={activeRecipeId}
+            // If your RecipeModal exports its Recipe type, you can type this properly.
+            // For now, pass the object we have (structurally compatible) and tighten later if desired.
+            recipe={activeRecipe as any}
           />
         )}
       </div>
