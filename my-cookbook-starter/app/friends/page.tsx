@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '../components/RecipeModal';
 import { RecipeTile } from '../components/RecipeBadges';
+import {
+  emitRecipeMutation,
+  subscribeRecipeMutations,
+} from '@/lib/recipeSync';
 
+// Match your public feed's Recipe type and attach client meta
 type Recipe = {
   id: string;
   user_id: string;
@@ -39,17 +44,20 @@ export default function FriendsFeed() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // infinite scroll
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
+  // dedupe & re-entrancy guards
   const seenIdsRef = useRef<Set<string>>(new Set());
   const fetchingPageRef = useRef<number | null>(null);
 
+  // modal
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [open, setOpen] = useState(false);
 
-  // Auth
+  // -------- Auth (client) --------
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -63,7 +71,7 @@ export default function FriendsFeed() {
     };
   }, []);
 
-  // Friends
+  // -------- Friend list --------
   useEffect(() => {
     if (!userId) return;
     let mounted = true;
@@ -97,7 +105,7 @@ export default function FriendsFeed() {
     [userId, friendIds]
   );
 
-  // Helpers
+  // -------- Helpers (no joins) --------
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     if (!userIds.length) return new Map<string, Profile>();
     const uniq = Array.from(new Set(userIds));
@@ -173,7 +181,7 @@ export default function FriendsFeed() {
     return v !== 'private';
   };
 
-  // Fetch page (recipes → profiles → counts+mine)
+  // -------- Page fetch (recipes → profiles → counts+mine) --------
   const fetchPage = useCallback(
     async (nextPage: number) => {
       if (fetchingPageRef.current === nextPage) return;
@@ -273,6 +281,31 @@ export default function FriendsFeed() {
     return () => io.disconnect();
   }, [hasMore, loading, page, fetchPage]);
 
+  // ===== SUBSCRIBE to cross-component mutations (from RecipeModal, etc.) =====
+  useEffect(() => {
+    const unsubscribe = subscribeRecipeMutations((m) => {
+      setRows((prev) =>
+        prev.map((x) => {
+          if (x.id !== m.id) return x;
+
+          const nextHeartCount =
+            m.heartDelta != null ? (x._heartCount ?? 0) + m.heartDelta : x._heartCount;
+          const nextBookmarkCount =
+            m.bookmarkDelta != null ? (x._bookmarkCount ?? 0) + m.bookmarkDelta : x._bookmarkCount;
+
+          return {
+            ...x,
+            _heartCount: nextHeartCount,
+            _bookmarkCount: nextBookmarkCount,
+            _heartedByMe: m.heartedByMe ?? x._heartedByMe,
+            _bookmarkedByMe: m.bookmarkedByMe ?? x._bookmarkedByMe,
+          };
+        })
+      );
+    });
+    return unsubscribe;
+  }, []);
+
   // Modal handlers
   function openRecipe(r: Recipe) {
     setSelected(r);
@@ -283,21 +316,26 @@ export default function FriendsFeed() {
     setSelected(null);
   }
 
-  // Toggle heart/bookmark (optimistic)
+  // ===== TOGGLES with optimistic update + EMIT events for cross-sync =====
   const toggleHeart = async (r: Recipe) => {
     if (!userId) return;
     const wasOn = !!r._heartedByMe;
+
+    // optimistic UI
     setRows((prev) =>
       prev.map((x) =>
         x.id === r.id
-          ? {
-              ...x,
-              _heartedByMe: !wasOn,
-              _heartCount: (x._heartCount ?? 0) + (wasOn ? -1 : 1),
-            }
+          ? { ...x, _heartedByMe: !wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? -1 : 1) }
           : x
       )
     );
+    // notify others
+    emitRecipeMutation({
+      id: r.id,
+      heartDelta: wasOn ? -1 : +1,
+      heartedByMe: !wasOn,
+    });
+
     try {
       if (wasOn) {
         await supabase.from('hearts').delete().eq('recipe_id', r.id).eq('user_id', userId);
@@ -305,24 +343,28 @@ export default function FriendsFeed() {
         await supabase.from('hearts').insert({ recipe_id: r.id, user_id: userId });
       }
     } catch {
-      // rollback on failure
+      // rollback UI
       setRows((prev) =>
         prev.map((x) =>
           x.id === r.id
-            ? {
-                ...x,
-                _heartedByMe: wasOn,
-                _heartCount: (x._heartCount ?? 0) + (wasOn ? 1 : -1),
-              }
+            ? { ...x, _heartedByMe: wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? 1 : -1) }
             : x
         )
       );
+      // rollback notification
+      emitRecipeMutation({
+        id: r.id,
+        heartDelta: wasOn ? +1 : -1,
+        heartedByMe: wasOn,
+      });
     }
   };
 
   const toggleBookmark = async (r: Recipe) => {
     if (!userId) return;
     const wasOn = !!r._bookmarkedByMe;
+
+    // optimistic UI (count visible only on own recipes)
     setRows((prev) =>
       prev.map((x) =>
         x.id === r.id
@@ -332,11 +374,18 @@ export default function FriendsFeed() {
               _bookmarkCount:
                 x.user_id === userId
                   ? (x._bookmarkCount ?? 0) + (wasOn ? -1 : 1)
-                  : x._bookmarkCount, // count only visible for own recipes
+                  : x._bookmarkCount,
             }
           : x
       )
     );
+    // notify others
+    emitRecipeMutation({
+      id: r.id,
+      bookmarkDelta: wasOn ? -1 : +1,
+      bookmarkedByMe: !wasOn,
+    });
+
     try {
       if (wasOn) {
         await supabase.from('bookmarks').delete().eq('recipe_id', r.id).eq('user_id', userId);
@@ -344,7 +393,7 @@ export default function FriendsFeed() {
         await supabase.from('bookmarks').insert({ recipe_id: r.id, user_id: userId });
       }
     } catch {
-      // rollback on failure
+      // rollback UI
       setRows((prev) =>
         prev.map((x) =>
           x.id === r.id
@@ -359,6 +408,12 @@ export default function FriendsFeed() {
             : x
         )
       );
+      // rollback notification
+      emitRecipeMutation({
+        id: r.id,
+        bookmarkDelta: wasOn ? +1 : -1,
+        bookmarkedByMe: wasOn,
+      });
     }
   };
 
@@ -547,14 +602,30 @@ function formatDate(iso: string) {
 /** Icons with "filled" state */
 function HeartIcon({ filled = false }: { filled?: boolean }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill={filled ? '#ef4444' : 'none'} stroke="#ef4444" strokeWidth="2">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill={filled ? '#ef4444' : 'none'}
+      stroke="#ef4444"
+      strokeWidth="2"
+    >
       <path d="M20.84 4.61c-1.54-1.42-3.98-1.42-5.52 0L12 7.17l-3.32-2.56c-1.54-1.42-3.98-1.42-5.52 0-1.82 1.68-1.82 4.4 0 6.08L12 21l8.84-10.31c1.82-1.68 1.82-4.4 0-6.08z" />
     </svg>
   );
 }
 function BookmarkIcon({ filled = false }: { filled?: boolean }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill={filled ? '#111827' : 'none'} stroke="#111827" strokeWidth="2">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      aria-hidden
+      fill={filled ? '#111827' : 'none'}
+      stroke="#111827"
+      strokeWidth="2"
+    >
       <path d="M6 3a2 2 0 0 0-2 2v16l8-4 8 4V5a2 2 0 0 0-2-2H6Z" />
     </svg>
   );
