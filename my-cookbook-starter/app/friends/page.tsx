@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '../components/RecipeModal';
-import { RecipeTile } from '../components/RecipeBadges'; // re-use your existing tile
+import { RecipeTile } from '../components/RecipeBadges';
 
 // Match your public feed's Recipe type
 type Recipe = {
@@ -16,7 +16,6 @@ type Recipe = {
   source_url: string | null;
   created_at: string | null;
   visibility?: string | null;
-  // attached after fetching:
   _profile?: Profile | null;
 };
 
@@ -45,7 +44,7 @@ export default function FriendsFeed() {
   const seenIdsRef = useRef<Set<string>>(new Set());
   const fetchingPageRef = useRef<number | null>(null);
 
-  // modal state (match public page)
+  // modal state
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -117,11 +116,9 @@ export default function FriendsFeed() {
 
   const fetchPage = useCallback(
     async (nextPage: number) => {
-      // prevent double fetch for same page
       if (fetchingPageRef.current === nextPage) return;
       fetchingPageRef.current = nextPage;
 
-      // if we don’t have user yet and also no friends, skip
       if (!userId && visibleUserIds.length === 0) {
         fetchingPageRef.current = null;
         return;
@@ -151,9 +148,7 @@ export default function FriendsFeed() {
 
         if (recipeErr) throw recipeErr;
 
-        // 2) Apply visibility:
-        // - Your own: always visible
-        // - Friends: only 'public' or 'friends'
+        // 2) Visibility rules
         const filtered: Recipe[] =
           (recipeRows as Recipe[] | null)?.filter((r) => {
             if (r.user_id === userId) return true;
@@ -161,11 +156,11 @@ export default function FriendsFeed() {
             return vis === 'public' || vis === 'friends';
           }) ?? [];
 
-        // 3) De-dupe by id (pages can overlap / effects can re-trigger)
+        // 3) De-dupe by id
         const newOnes = filtered.filter((r) => !seenIdsRef.current.has(r.id));
         newOnes.forEach((r) => seenIdsRef.current.add(r.id));
 
-        // 4) Fetch author profiles for the **new** ones only
+        // 4) Fetch/attach profiles for new rows
         const needProfilesFor = newOnes.map((r) => r.user_id);
         const profileMap = await fetchProfiles(needProfilesFor);
 
@@ -189,9 +184,9 @@ export default function FriendsFeed() {
     [userId, visibleUserIds, fetchProfiles]
   );
 
-  // reset and load first page when user or friend list changes
+  // reset & first page on dependency change
   useEffect(() => {
-    if (!userId) return; // wait until we know user
+    if (!userId) return;
     setRows([]);
     setPage(0);
     setHasMore(true);
@@ -199,7 +194,7 @@ export default function FriendsFeed() {
     fetchPage(0);
   }, [userId, friendIds.join('|'), fetchPage]);
 
-  // infinite scroll observer
+  // infinite scroll
   useEffect(() => {
     if (!hasMore || loading) return;
     const el = sentinelRef.current;
@@ -230,7 +225,12 @@ export default function FriendsFeed() {
 
   return (
     <main className="w-full flex justify-center">
-      <div className="w-full max-w-[420px]">
+      {/* Responsive centered column:
+         - default: max-w-420px (phones)
+         - sm:     max-w-500px (small tablets)
+         - md+:    max-w-560px (iPad / desktop)
+      */}
+      <div className="w-full max-w-[420px] sm:max-w-[500px] md:max-w-[560px] mx-auto">
         {/* Header */}
         <div className="px-4 py-3 border-b border-neutral-200">
           <h1 className="text-xl font-semibold m-0">Friends</h1>
@@ -266,14 +266,14 @@ export default function FriendsFeed() {
         <div className="flex flex-col">
           {rows.map((r) => (
             <article key={r.id} className="pt-4 border-b border-neutral-200">
-              {/* Header: small avatar + inline name */}
-              <div className="px-4 pb-3 flex items-center gap-2">
+              {/* Header: bigger avatar + bold name inline */}
+              <div className="px-4 pb-3 flex items-center gap-3">
                 <Avatar
                   src={r._profile?.avatar_url ?? null}
                   name={r._profile?.display_name ?? 'User'}
-                  size={32} // smaller avatar
+                  size={40} // bumped from 32 → 40
                 />
-                <span className="font-medium">
+                <span className="font-semibold">
                   {r._profile?.display_name ?? 'Unknown User'}
                 </span>
               </div>
@@ -298,8 +298,8 @@ export default function FriendsFeed() {
             <div className="p-4">
               {[...Array(3)].map((_, i) => (
                 <div key={i} className="mb-6">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="w-8 h-8 rounded-full bg-neutral-200" />
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-neutral-200" />
                     <div className="h-3 w-32 bg-neutral-200 rounded" />
                   </div>
                   <div
@@ -322,11 +322,11 @@ export default function FriendsFeed() {
   );
 }
 
-/** Tiny avatar with initials fallback */
+/** Avatar with initials fallback */
 function Avatar({
   src,
   name,
-  size = 32,
+  size = 40,
 }: {
   src: string | null;
   name: string;
@@ -348,6 +348,7 @@ function Avatar({
     objectFit: 'cover',
     display: 'block',
     border: '1px solid #e5e7eb',
+    flex: '0 0 auto',
   };
 
   return src ? (
@@ -361,8 +362,8 @@ function Avatar({
         color: '#374151',
         display: 'grid',
         placeItems: 'center',
-        fontSize: 12,
-        fontWeight: 600,
+        fontSize: 13,
+        fontWeight: 700,
       }}
       aria-label={name}
       title={name}
