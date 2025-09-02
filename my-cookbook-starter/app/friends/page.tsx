@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeModal from '@/app/components/RecipeModal';
+import RecipeModal from '../components/RecipeModal';
 
 type Profile = {
   id: string;
