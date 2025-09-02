@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
-import RecipeModal from '../components/RecipeModal'; // mirrors your public feed import
+import RecipeModal from '../components/RecipeModal';
+import { RecipeTile } from '../components/RecipeBadges'; // re-use your existing tile
 
-// Match your existing Recipe type from the public feed
+// Match your public feed's Recipe type
 type Recipe = {
   id: string;
   user_id: string;
@@ -16,7 +16,7 @@ type Recipe = {
   source_url: string | null;
   created_at: string | null;
   visibility?: string | null;
-  // we'll attach the author's profile after fetching:
+  // attached after fetching:
   _profile?: Profile | null;
 };
 
@@ -31,19 +31,25 @@ const PAGE_SIZE = 12;
 export default function FriendsFeed() {
   const [userId, setUserId] = useState<string | null>(null);
   const [friendIds, setFriendIds] = useState<string[]>([]);
+
   const [rows, setRows] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
+
+  // infinite scroll
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // modal state (mirror your public page)
+  // dedupe + re-entrancy guards
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const fetchingPageRef = useRef<number | null>(null);
+
+  // modal state (match public page)
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [open, setOpen] = useState(false);
 
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-
-  // Get current user id
+  // current user
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -60,7 +66,7 @@ export default function FriendsFeed() {
     };
   }, []);
 
-  // Fetch friend ids (accepted either direction)
+  // friends (accepted either direction)
   useEffect(() => {
     if (!userId) return;
     let mounted = true;
@@ -88,12 +94,12 @@ export default function FriendsFeed() {
     };
   }, [userId]);
 
-  // Users whose recipes we consider: you + your friends
+  // candidates = you + friends
   const visibleUserIds = useMemo(() => {
     return userId ? [userId, ...friendIds] : friendIds;
   }, [userId, friendIds]);
 
-  // Fetch profiles for a set of userIds
+  // fetch profiles for given userIds
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     if (!userIds.length) return new Map<string, Profile>();
     const uniq = Array.from(new Set(userIds));
@@ -104,24 +110,31 @@ export default function FriendsFeed() {
 
     if (error) throw error;
 
-    const m = new Map<string, Profile>();
-    (data ?? []).forEach((p) => m.set(p.id, p as Profile));
-    return m;
+    const map = new Map<string, Profile>();
+    (data ?? []).forEach((p) => map.set(p.id, p as Profile));
+    return map;
   }, []);
 
-  // Fetch one page (recipes only, then profiles; no relational join)
   const fetchPage = useCallback(
     async (nextPage: number) => {
-      // If we don't know the current user and also have no friends, nothing to do
-      if (!userId && visibleUserIds.length === 0) return;
+      // prevent double fetch for same page
+      if (fetchingPageRef.current === nextPage) return;
+      fetchingPageRef.current = nextPage;
+
+      // if we don’t have user yet and also no friends, skip
+      if (!userId && visibleUserIds.length === 0) {
+        fetchingPageRef.current = null;
+        return;
+      }
 
       setLoading(true);
       setMsg(null);
+
       try {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // 1) Pull recipes for you + friends
+        // 1) Pull recipes (no relational join)
         const { data: recipeRows, error: recipeErr } = await supabase
           .from('recipes')
           .select(
@@ -131,32 +144,38 @@ export default function FriendsFeed() {
             'user_id',
             visibleUserIds.length
               ? visibleUserIds
-              : ['00000000-0000-0000-0000-000000000000'] // guard for empty in()
+              : ['00000000-0000-0000-0000-000000000000'] // guard
           )
           .order('created_at', { ascending: false })
           .range(from, to);
 
         if (recipeErr) throw recipeErr;
 
-        // 2) Apply visibility rules client-side:
-        // - Your own recipes: show regardless of visibility
-        // - Friends' recipes: only show if visibility IN ('public','friends')
-        const filtered: Recipe[] = (recipeRows as Recipe[] | null)?.filter((r) => {
-          if (r.user_id === userId) return true;
-          const vis = (r.visibility ?? '').toLowerCase();
-          return vis === 'public' || vis === 'friends';
-        }) ?? [];
+        // 2) Apply visibility:
+        // - Your own: always visible
+        // - Friends: only 'public' or 'friends'
+        const filtered: Recipe[] =
+          (recipeRows as Recipe[] | null)?.filter((r) => {
+            if (r.user_id === userId) return true;
+            const vis = (r.visibility ?? '').toLowerCase();
+            return vis === 'public' || vis === 'friends';
+          }) ?? [];
 
-        // 3) Fetch needed profiles and attach
-        const neededIds = filtered.map((r) => r.user_id);
-        const profilesMap = await fetchProfiles(neededIds);
-        const withProfiles: Recipe[] = filtered.map((r) => ({
+        // 3) De-dupe by id (pages can overlap / effects can re-trigger)
+        const newOnes = filtered.filter((r) => !seenIdsRef.current.has(r.id));
+        newOnes.forEach((r) => seenIdsRef.current.add(r.id));
+
+        // 4) Fetch author profiles for the **new** ones only
+        const needProfilesFor = newOnes.map((r) => r.user_id);
+        const profileMap = await fetchProfiles(needProfilesFor);
+
+        const withProfiles: Recipe[] = newOnes.map((r) => ({
           ...r,
-          _profile: profilesMap.get(r.user_id) ?? null,
+          _profile: profileMap.get(r.user_id) ?? null,
         }));
 
-        // 4) Append to rows
         const gotAll = (recipeRows?.length ?? 0) < PAGE_SIZE;
+
         setRows((prev) => [...prev, ...withProfiles]);
         setHasMore(!gotAll);
         setPage(nextPage);
@@ -164,21 +183,23 @@ export default function FriendsFeed() {
         setMsg(e.message ?? 'Failed to load friends feed.');
       } finally {
         setLoading(false);
+        fetchingPageRef.current = null;
       }
     },
     [userId, visibleUserIds, fetchProfiles]
   );
 
-  // Initial load when we have the userId/friends list
+  // reset and load first page when user or friend list changes
   useEffect(() => {
-    if (!userId) return; // wait for auth
+    if (!userId) return; // wait until we know user
     setRows([]);
     setPage(0);
     setHasMore(true);
+    seenIdsRef.current.clear();
     fetchPage(0);
   }, [userId, friendIds.join('|'), fetchPage]);
 
-  // Infinite scroll
+  // infinite scroll observer
   useEffect(() => {
     if (!hasMore || loading) return;
     const el = sentinelRef.current;
@@ -218,7 +239,7 @@ export default function FriendsFeed() {
           </p>
         </div>
 
-        {/* Messages */}
+        {/* Error */}
         {msg && (
           <div className="m-4 rounded-md bg-red-50 p-3 text-sm text-red-700 border border-red-200">
             {msg}
@@ -241,76 +262,50 @@ export default function FriendsFeed() {
           </div>
         )}
 
-        {/* Feed (single column IG style) */}
+        {/* Single-column feed */}
         <div className="flex flex-col">
           {rows.map((r) => (
             <article key={r.id} className="pt-4 border-b border-neutral-200">
-              {/* Row header with avatar + display name */}
-              <div className="px-4 pb-3 flex items-center gap-3">
+              {/* Header: small avatar + inline name */}
+              <div className="px-4 pb-3 flex items-center gap-2">
                 <Avatar
                   src={r._profile?.avatar_url ?? null}
                   name={r._profile?.display_name ?? 'User'}
+                  size={32} // smaller avatar
                 />
-                <div className="flex flex-col leading-tight">
-                  <span className="font-medium">
-                    {r._profile?.display_name ?? 'Unknown User'}
-                  </span>
-                </div>
+                <span className="font-medium">
+                  {r._profile?.display_name ?? 'Unknown User'}
+                </span>
               </div>
 
-              {/* Image with overlay (title + types) */}
+              {/* Image tile with shaded bottom overlay (your RecipeTile) */}
               <div className="px-0">
-                <div className="relative w-full overflow-hidden" style={{ aspectRatio: '4 / 3' }}>
-                  <button
-                    onClick={() => openRecipe(r)}
-                    className="absolute inset-0"
-                    aria-label={`Open ${r.title}`}
-                  />
-                  {r.photo_url ? (
-                    <Image
-                      src={r.photo_url}
-                      alt={r.title}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 420px) 100vw, 420px"
-                      priority={false}
-                    />
-                  ) : (
-                    <div className="absolute inset-0 bg-neutral-200" />
-                  )}
-
-                  <div className="absolute bottom-2 left-2 right-2">
-                    <button
-                      onClick={() => openRecipe(r)}
-                      className="rounded-md bg-black/60 backdrop-blur-[2px] px-3 py-2 text-left w-fit max-w-full"
-                    >
-                      <h3 className="text-white font-semibold leading-snug line-clamp-2">
-                        {r.title}
-                      </h3>
-                      {!!(r.recipe_types?.length) && (
-                        <p className="text-white/90 text-xs uppercase mt-0.5 truncate">
-                          {r.recipe_types.join(' • ')}
-                        </p>
-                      )}
-                    </button>
-                  </div>
-                </div>
+                <RecipeTile
+                  title={r.title}
+                  types={r.recipe_types ?? []}
+                  photoUrl={r.photo_url}
+                  onClick={() => openRecipe(r)}
+                  ariaLabel={`Open ${r.title}`}
+                />
               </div>
 
               <div className="h-2" />
             </article>
           ))}
 
-          {/* Skeletons for initial load */}
+          {/* Skeletons */}
           {loading && rows.length === 0 && (
             <div className="p-4">
               {[...Array(3)].map((_, i) => (
                 <div key={i} className="mb-6">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-neutral-200" />
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-8 h-8 rounded-full bg-neutral-200" />
                     <div className="h-3 w-32 bg-neutral-200 rounded" />
                   </div>
-                  <div className="w-full rounded-md bg-neutral-200" style={{ aspectRatio: '4 / 3' }} />
+                  <div
+                    className="w-full rounded-md bg-neutral-200"
+                    style={{ aspectRatio: '1 / 1' }}
+                  />
                 </div>
               ))}
             </div>
@@ -320,15 +315,23 @@ export default function FriendsFeed() {
         {/* Infinite scroll sentinel */}
         <div ref={sentinelRef} className="h-12" />
 
-        {/* Shared modal (same contract as your public page) */}
+        {/* Shared modal */}
         <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
       </div>
     </main>
   );
 }
 
-/** Minimal avatar with initials fallback (no external component needed) */
-function Avatar({ src, name }: { src: string | null; name: string }) {
+/** Tiny avatar with initials fallback */
+function Avatar({
+  src,
+  name,
+  size = 32,
+}: {
+  src: string | null;
+  name: string;
+  size?: number;
+}) {
   const initials =
     (name ?? '')
       .trim()
@@ -338,15 +341,32 @@ function Avatar({ src, name }: { src: string | null; name: string }) {
       .map((p) => p[0]?.toUpperCase() ?? '')
       .join('') || 'U';
 
+  const style: React.CSSProperties = {
+    width: size,
+    height: size,
+    borderRadius: '9999px',
+    objectFit: 'cover',
+    display: 'block',
+    border: '1px solid #e5e7eb',
+  };
+
   return src ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={name ?? 'User'}
-      className="w-10 h-10 rounded-full object-cover border border-neutral-200"
-    />
+    <img src={src} alt={name ?? 'User'} style={style} />
   ) : (
-    <div className="w-10 h-10 rounded-full bg-neutral-300 text-neutral-700 grid place-items-center text-sm font-semibold border border-neutral-200">
+    <div
+      style={{
+        ...style,
+        background: '#e5e7eb',
+        color: '#374151',
+        display: 'grid',
+        placeItems: 'center',
+        fontSize: 12,
+        fontWeight: 600,
+      }}
+      aria-label={name}
+      title={name}
+    >
       {initials}
     </div>
   );
