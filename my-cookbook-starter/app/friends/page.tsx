@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '../components/RecipeModal';
 
 type Profile = {
-  id: string;
+  id: string | null;
   display_name: string | null;
   avatar_url: string | null;
 };
@@ -19,7 +19,7 @@ type RecipeRow = {
   photo_url: string | null;
   privacy: 'public' | 'friends' | 'private';
   created_at: string;
-  profiles?: Profile; // joined profile
+  profiles?: Profile | null; // single object, not array (thanks to FK-qualified join)
 };
 
 const PAGE_SIZE = 12;
@@ -74,25 +74,23 @@ export default function FriendsPage() {
     })();
   }, [userId]);
 
+  // Only fetch from you + friends (not the whole public)
   const visibleUserIds = useMemo(() => {
-    // Only fetch from you + friends (not “everyone public”)
     return userId ? [userId, ...friendIds] : friendIds;
   }, [userId, friendIds]);
 
   const fetchPage = useCallback(
     async (nextPage: number) => {
-      if (!userId || visibleUserIds.length === 0) {
-        // You might have no friends yet; still show your own recipes
-        if (!userId) return;
-      }
+      if (!userId && visibleUserIds.length === 0) return;
+
       setLoading(true);
       setErrorMsg(null);
       try {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // Single query over just you + your friends.
-        // We’ll client-filter away friends’ "private" recipes (your own still show).
+        // IMPORTANT: Use the FK-qualified join so `profiles` is a single object, not an array.
+        // If your FK name is different, replace recipes_user_id_fkey with your actual FK.
         const { data, error } = await supabase
           .from('recipes')
           .select(
@@ -104,28 +102,25 @@ export default function FriendsPage() {
               photo_url,
               privacy,
               created_at,
-              profiles:profiles (
+              profiles:profiles!recipes_user_id_fkey (
                 id,
                 display_name,
                 avatar_url
               )
             `
           )
-          .in('user_id', userId ? [userId, ...friendIds] : friendIds)
+          .in('user_id', visibleUserIds.length ? visibleUserIds : ['00000000-0000-0000-0000-000000000000'])
           .order('created_at', { ascending: false })
           .range(from, to);
 
         if (error) throw error;
 
-        const filtered =
-          (data ?? []).filter((r) => {
-            if (r.user_id === userId) return true; // always see your own
-            return r.privacy === 'public' || r.privacy === 'friends';
-          }) as RecipeRow[];
+        // Filter client-side: always show your own; for friends allow public + friends
+        const filtered: RecipeRow[] = (data ?? []).filter((r) => {
+          if (r.user_id === userId) return true;
+          return r.privacy === 'public' || r.privacy === 'friends';
+        }) as RecipeRow[];
 
-        // If the server returned fewer than PAGE_SIZE, we *might* be done.
-        // However, because we filter on the client, we should determine hasMore
-        // by checking if the raw server response was < PAGE_SIZE.
         const gotAll = (data?.length ?? 0) < PAGE_SIZE;
 
         setRecipes((prev) => [...prev, ...filtered]);
@@ -137,19 +132,17 @@ export default function FriendsPage() {
         setLoading(false);
       }
     },
-    [userId, friendIds, visibleUserIds.length]
+    [userId, visibleUserIds]
   );
 
-  // Initial load
+  // Initial load / reload when friends set changes
   useEffect(() => {
     if (!userId) return;
     setRecipes([]);
     setPage(0);
     setHasMore(true);
-    // Kick off first page
     fetchPage(0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, friendIds.join('|')]);
+  }, [userId, friendIds.join('|'), fetchPage]);
 
   // Infinite scroll observer
   useEffect(() => {
@@ -220,10 +213,6 @@ export default function FriendsPage() {
                   <span className="font-medium">
                     {r.profiles?.display_name ?? 'Unknown User'}
                   </span>
-                  {/* Optional timestamp: */}
-                  {/* <span className="text-xs text-neutral-500">
-                    {new Date(r.created_at).toLocaleString()}
-                  </span> */}
                 </div>
               </div>
 
@@ -252,17 +241,17 @@ export default function FriendsPage() {
                     <div className="absolute inset-0 bg-neutral-200" />
                   )}
 
-                  {/* Shaded box overlay with title + type (clickable) */}
-                  <div className="absolute bottom-2 left-2">
+                  {/* Shaded overlay with title + type (clickable) */}
+                  <div className="absolute bottom-2 left-2 right-2">
                     <button
                       onClick={() => handleOpen(r.id)}
-                      className="rounded-md bg-black/60 backdrop-blur-[2px] px-3 py-2 text-left"
+                      className="rounded-md bg-black/60 backdrop-blur-[2px] px-3 py-2 text-left w-fit max-w-full"
                     >
                       <h3 className="text-white font-semibold leading-snug line-clamp-2">
                         {r.title}
                       </h3>
                       {r.recipes_types && (
-                        <p className="text-white/90 text-xs uppercase mt-0.5">
+                        <p className="text-white/90 text-xs uppercase mt-0.5 truncate">
                           {r.recipes_types}
                         </p>
                       )}
@@ -285,7 +274,10 @@ export default function FriendsPage() {
                     <div className="w-10 h-10 rounded-full bg-neutral-200" />
                     <div className="h-3 w-32 bg-neutral-200 rounded" />
                   </div>
-                  <div className="w-full rounded-md bg-neutral-200" style={{ aspectRatio: '4 / 3' }} />
+                  <div
+                    className="w-full rounded-md bg-neutral-200"
+                    style={{ aspectRatio: '4 / 3' }}
+                  />
                 </div>
               ))}
             </div>
@@ -300,7 +292,7 @@ export default function FriendsPage() {
           <RecipeModal
             open={isModalOpen}
             onClose={handleClose}
-            // Assuming your modal takes recipeId; adjust if it expects a recipe object
+            // If your modal expects a different prop name, adjust here:
             recipeId={activeRecipeId}
           />
         )}
@@ -313,7 +305,12 @@ export default function FriendsPage() {
 function Avatar({ src, name }: { src: string | null; name: string }) {
   const initials = useMemo(() => {
     const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
-    return parts.slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || 'U';
+    return (
+      parts
+        .slice(0, 2)
+        .map((p) => p[0]?.toUpperCase() ?? '')
+        .join('') || 'U'
+    );
   }, [name]);
 
   return src ? (
