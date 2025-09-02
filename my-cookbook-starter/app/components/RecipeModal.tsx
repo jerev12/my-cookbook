@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { emitRecipeMutation, subscribeRecipeMutations } from '@/lib/recipeSync'; // ✅ ADDED
+import { emitRecipeMutation, subscribeRecipeMutations } from '@/lib/recipeSync'; // step 2 uses this, safe-guarded below
 
 type Recipe = {
   id: string;
@@ -145,7 +145,7 @@ export default function RecipeModal({
       setSteps((stepData as StepRow[]) || []);
       setIngs((ingData as IngredientRow[]) || []);
 
-      // hearts/bookmarks (⚠️ keep your original table names)
+      // hearts/bookmarks (keep your original table names)
       const { data: heartRows } = await supabase
         .from('recipe_hearts')
         .select('recipe_id')
@@ -195,33 +195,56 @@ export default function RecipeModal({
     };
   }, [open, recipe]);
 
-  // ✅ subscribe to cross-component sync messages (Friends feed / other modals)
+  // ===== Step 2: Hardened subscription to cross-component sync messages =====
   useEffect(() => {
     if (!recipe) return;
+
+    if (typeof subscribeRecipeMutations !== 'function') {
+      // If the import failed for any reason, don't crash — just skip syncing.
+      console.warn('[RecipeModal] subscribeRecipeMutations not available');
+      return;
+    }
+
     const unsubscribe = subscribeRecipeMutations((m) => {
-      if (m.id !== recipe.id) return;
+      try {
+        if (!recipe || m.id !== recipe.id) return;
 
-      if (m.heartDelta != null) {
-        setHeartCount((c) => Math.max(0, c + m.heartDelta!));
+        if (typeof m.heartDelta === 'number') {
+          setHeartCount((c) => Math.max(0, c + m.heartDelta));
+        }
+        if (typeof m.bookmarkDelta === 'number' && isOwner) {
+          setBookmarkCount((c) => Math.max(0, c + m.bookmarkDelta));
+        }
+        if (typeof m.heartedByMe === 'boolean') setDidHeart(m.heartedByMe);
+        if (typeof m.bookmarkedByMe === 'boolean') setDidSave(m.bookmarkedByMe);
+      } catch {
+        // never let the event handler crash the UI
       }
-      if (m.bookmarkDelta != null && isOwner) {
-        setBookmarkCount((c) => Math.max(0, c + m.bookmarkDelta!));
-      }
-      if (m.heartedByMe != null) setDidHeart(m.heartedByMe);
-      if (m.bookmarkedByMe != null) setDidSave(m.bookmarkedByMe);
     });
-    return unsubscribe;
-  }, [recipe, isOwner]);
 
-  // ✅ emit sync messages when toggling (and rollback on failure)
+    return unsubscribe;
+  }, [recipe?.id, isOwner]);
+
+  // ===== Step 2: Hardened emit calls (guarded + rollback emits) =====
   async function toggleHeart() {
     if (!currentUserId || !recipe || busyHeart) return;
     setBusyHeart(true);
     const next = !didHeart;
+
     // optimistic
     setDidHeart(next);
     setHeartCount((c) => Math.max(0, c + (next ? 1 : -1)));
-    emitRecipeMutation({ id: recipe.id, heartDelta: next ? +1 : -1, heartedByMe: next });
+
+    // broadcast (guarded)
+    try {
+      emitRecipeMutation?.({
+        id: recipe.id,
+        heartDelta: next ? +1 : -1,
+        heartedByMe: next,
+      });
+    } catch {
+      // ignore errors from emitter
+    }
 
     try {
       if (next) {
@@ -242,7 +265,15 @@ export default function RecipeModal({
       // rollback
       setDidHeart(!next);
       setHeartCount((c) => Math.max(0, c + (next ? -1 : 1)));
-      emitRecipeMutation({ id: recipe.id, heartDelta: next ? -1 : +1, heartedByMe: !next });
+      try {
+        emitRecipeMutation?.({
+          id: recipe.id,
+          heartDelta: next ? -1 : +1,
+          heartedByMe: !next,
+        });
+      } catch {
+        // ignore
+      }
     } finally {
       setBusyHeart(false);
     }
@@ -252,10 +283,21 @@ export default function RecipeModal({
     if (!currentUserId || !recipe || busySave) return;
     setBusySave(true);
     const next = !didSave;
+
     // optimistic
     setDidSave(next);
     if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? 1 : -1)));
-    emitRecipeMutation({ id: recipe.id, bookmarkDelta: next ? +1 : -1, bookmarkedByMe: next });
+
+    // broadcast (guarded)
+    try {
+      emitRecipeMutation?.({
+        id: recipe.id,
+        bookmarkDelta: next ? +1 : -1,
+        bookmarkedByMe: next,
+      });
+    } catch {
+      // ignore
+    }
 
     try {
       if (next) {
@@ -276,7 +318,15 @@ export default function RecipeModal({
       // rollback
       setDidSave(!next);
       if (isOwner) setBookmarkCount((c) => Math.max(0, c + (next ? -1 : 1)));
-      emitRecipeMutation({ id: recipe.id, bookmarkDelta: next ? -1 : +1, bookmarkedByMe: !next });
+      try {
+        emitRecipeMutation?.({
+          id: recipe.id,
+          bookmarkDelta: next ? -1 : +1,
+          bookmarkedByMe: !next,
+        });
+      } catch {
+        // ignore
+      }
     } finally {
       setBusySave(false);
     }
