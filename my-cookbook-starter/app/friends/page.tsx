@@ -16,7 +16,11 @@ type Recipe = {
   source_url: string | null;
   created_at: string | null;
   visibility?: string | null;
-  _profile?: Profile | null; // attached after fetch
+
+  // attached after fetching:
+  _profile?: Profile | null;
+  _heartCount?: number;
+  _bookmarkCount?: number;
 };
 
 type Profile = {
@@ -44,7 +48,7 @@ export default function FriendsFeed() {
   const seenIdsRef = useRef<Set<string>>(new Set());
   const fetchingPageRef = useRef<number | null>(null);
 
-  // modal state (match public page)
+  // modal state (same contract as your other pages)
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -114,6 +118,40 @@ export default function FriendsFeed() {
     return map;
   }, []);
 
+  // fetch counts for hearts & bookmarks (simple + reliable: count rows per recipe on client)
+  const fetchCounts = useCallback(async (recipeIds: string[]) => {
+    const ids = Array.from(new Set(recipeIds));
+    if (!ids.length) return { hearts: new Map<string, number>(), bookmarks: new Map<string, number>() };
+
+    // Hearts (public count)
+    const { data: heartRows, error: heartErr } = await supabase
+      .from('hearts')
+      .select('recipe_id') // one row per heart
+      .in('recipe_id', ids);
+
+    if (heartErr) throw heartErr;
+
+    // Bookmarks (count all bookmarks; we’ll only show count for your own recipes)
+    const { data: bookmarkRows, error: bookmarkErr } = await supabase
+      .from('bookmarks')
+      .select('recipe_id') // one row per bookmark
+      .in('recipe_id', ids);
+
+    if (bookmarkErr) throw bookmarkErr;
+
+    const heartMap = new Map<string, number>();
+    (heartRows ?? []).forEach((r: any) => {
+      heartMap.set(r.recipe_id, (heartMap.get(r.recipe_id) ?? 0) + 1);
+    });
+
+    const bookmarkMap = new Map<string, number>();
+    (bookmarkRows ?? []).forEach((r: any) => {
+      bookmarkMap.set(r.recipe_id, (bookmarkMap.get(r.recipe_id) ?? 0) + 1);
+    });
+
+    return { hearts: heartMap, bookmarks: bookmarkMap };
+  }, []);
+
   const fetchPage = useCallback(
     async (nextPage: number) => {
       if (fetchingPageRef.current === nextPage) return;
@@ -164,14 +202,19 @@ export default function FriendsFeed() {
         const needProfilesFor = newOnes.map((r) => r.user_id);
         const profileMap = await fetchProfiles(needProfilesFor);
 
-        const withProfiles: Recipe[] = newOnes.map((r) => ({
+        // 5) Fetch/attach counts for new rows (hearts + bookmarks)
+        const { hearts, bookmarks } = await fetchCounts(newOnes.map((r) => r.id));
+
+        const withMeta: Recipe[] = newOnes.map((r) => ({
           ...r,
           _profile: profileMap.get(r.user_id) ?? null,
+          _heartCount: hearts.get(r.id) ?? 0,
+          _bookmarkCount: bookmarks.get(r.id) ?? 0,
         }));
 
         const gotAll = (recipeRows?.length ?? 0) < PAGE_SIZE;
 
-        setRows((prev) => [...prev, ...withProfiles]);
+        setRows((prev) => [...prev, ...withMeta]);
         setHasMore(!gotAll);
         setPage(nextPage);
       } catch (e: any) {
@@ -181,7 +224,7 @@ export default function FriendsFeed() {
         fetchingPageRef.current = null;
       }
     },
-    [userId, visibleUserIds, fetchProfiles]
+    [userId, visibleUserIds, fetchProfiles, fetchCounts]
   );
 
   // reset & first page on dependency change
@@ -223,24 +266,24 @@ export default function FriendsFeed() {
     setSelected(null);
   }
 
-  // ------- INLINE LAYOUT (so it works even if Tailwind classes don't apply) -------
+  // ------- INLINE LAYOUT for consistent rendering -------
   const containerStyle: React.CSSProperties = {
-    // cap the width so iPad/Desktop never get huge tiles
-    maxWidth: 560,          // tweak to taste: 520/560/600
+    maxWidth: 560, // cap column on larger screens (change to 520 if you want narrower)
     width: '100%',
     margin: '0 auto',
   };
 
+  // Compact header row (less vertical space)
   const headerRowStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
-    gap: 12,
-    padding: '12px 16px',
+    gap: 10,
+    padding: '6px 16px',        // tighter than before
     borderBottom: '1px solid #e5e7eb',
   };
 
   const articleStyle: React.CSSProperties = {
-    paddingTop: 16,
+    paddingTop: 6,              // tighter spacing above image
     borderBottom: '1px solid #e5e7eb',
   };
 
@@ -250,6 +293,16 @@ export default function FriendsFeed() {
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+  };
+
+  // Compact “meta/actions” row under the image
+  const actionsRowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 14,
+    padding: '6px 12px 10px 12px', // tight top/bottom
+    color: '#374151',
+    fontSize: 13,
   };
 
   return (
@@ -300,19 +353,19 @@ export default function FriendsFeed() {
         <div>
           {rows.map((r) => (
             <article key={r.id} style={articleStyle}>
-              {/* Avatar + bold name INLINE (never below) */}
+              {/* Compact avatar + bold name INLINE */}
               <div style={headerRowStyle}>
                 <Avatar
                   src={r._profile?.avatar_url ?? null}
                   name={r._profile?.display_name ?? 'User'}
-                  size={48} // larger avatar
+                  size={44} // slightly smaller than before, still readable
                 />
                 <span style={boldNameStyle} title={r._profile?.display_name ?? 'Unknown User'}>
                   {r._profile?.display_name ?? 'Unknown User'}
                 </span>
               </div>
 
-              {/* Image tile with shaded bottom overlay (your RecipeTile) */}
+              {/* Image tile (your component: keeps shaded bottom overlay) */}
               <div style={{ paddingLeft: 0, paddingRight: 0 }}>
                 <RecipeTile
                   title={r.title}
@@ -323,7 +376,24 @@ export default function FriendsFeed() {
                 />
               </div>
 
-              <div style={{ height: 8 }} />
+              {/* Compact meta/actions row under image */}
+              <div style={actionsRowStyle}>
+                <span title={r.created_at ? new Date(r.created_at).toLocaleString() : undefined}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#6b7280' }}>
+                  <CalendarIcon />
+                  {r.created_at ? formatDate(r.created_at) : '—'}
+                </span>
+
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <HeartIcon />
+                  {r._heartCount ?? 0}
+                </span>
+
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: r.user_id === userId ? '#374151' : '#9CA3AF' }}>
+                  <BookmarkIcon />
+                  {r.user_id === userId ? (r._bookmarkCount ?? 0) : null}
+                </span>
+              </div>
             </article>
           ))}
 
@@ -331,12 +401,13 @@ export default function FriendsFeed() {
           {loading && rows.length === 0 && (
             <div style={{ padding: 16 }}>
               {[...Array(3)].map((_, i) => (
-                <div key={i} style={{ marginBottom: 24 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 9999, background: '#e5e7eb' }} />
+                <div key={i} style={{ marginBottom: 18 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 44, height: 44, borderRadius: 9999, background: '#e5e7eb' }} />
                     <div style={{ height: 12, width: 128, background: '#e5e7eb', borderRadius: 6 }} />
                   </div>
                   <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#e5e7eb', borderRadius: 8 }} />
+                  <div style={{ height: 28 }} />
                 </div>
               ))}
             </div>
@@ -344,7 +415,7 @@ export default function FriendsFeed() {
         </div>
 
         {/* Infinite scroll sentinel */}
-        <div ref={sentinelRef} style={{ height: 48 }} />
+        <div ref={sentinelRef} style={{ height: 36 }} />
 
         {/* Shared modal */}
         <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
@@ -353,11 +424,45 @@ export default function FriendsFeed() {
   );
 }
 
-/** Avatar with initials fallback (inline styles; size-controlled) */
+/** Helpers */
+
+function formatDate(iso: string) {
+  // "Added on" — compact Month Day, Year
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/** Icons (inline SVG so no extra deps) */
+
+function CalendarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
+      <path d="M7 2a1 1 0 1 1 2 0v1h6V2a1 1 0 1 1 2 0v1h1a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h1V2Zm-1 5h12a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a1 1 0 0 1 1-1Z" />
+    </svg>
+  );
+}
+
+function HeartIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
+      <path d="M12.001 5.53C10.2 3.5 6.9 3.5 5.1 5.53c-1.92 2.17-1.45 5.3.93 7.06l5.97 4.55 5.97-4.55c2.38-1.76 2.85-4.89.93-7.06-1.8-2.03-5.1-2.03-6.9 0l-.1.11-.1-.11Z" />
+    </svg>
+  );
+}
+
+function BookmarkIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
+      <path d="M6 3a2 2 0 0 0-2 2v16l8-4 8 4V5a2 2 0 0 0-2-2H6Z" />
+    </svg>
+  );
+}
+
+/** Avatar with initials fallback (compact spacing; size controlled) */
 function Avatar({
   src,
   name,
-  size = 48,
+  size = 44,
 }: {
   src: string | null;
   name: string;
@@ -393,7 +498,7 @@ function Avatar({
         color: '#374151',
         display: 'grid',
         placeItems: 'center',
-        fontSize: 14,
+        fontSize: 13,
         fontWeight: 700,
       }}
       aria-label={name}
