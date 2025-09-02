@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '../components/RecipeModal';
 import { RecipeTile } from '../components/RecipeBadges';
 
-// Match your public feed's Recipe shape
 type Recipe = {
   id: string;
   user_id: string;
@@ -21,6 +20,8 @@ type Recipe = {
   _profile?: Profile | null;
   _heartCount?: number;
   _bookmarkCount?: number;
+  _heartedByMe?: boolean;
+  _bookmarkedByMe?: boolean;
 };
 
 type Profile = {
@@ -38,20 +39,17 @@ export default function FriendsFeed() {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
 
-  // infinite scroll
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // dedupe & re-entrancy guards
   const seenIdsRef = useRef<Set<string>>(new Set());
   const fetchingPageRef = useRef<number | null>(null);
 
-  // modal
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [open, setOpen] = useState(false);
 
-  // -------- Auth (client) --------
+  // Auth
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -65,7 +63,7 @@ export default function FriendsFeed() {
     };
   }, []);
 
-  // -------- Friend list --------
+  // Friends
   useEffect(() => {
     if (!userId) return;
     let mounted = true;
@@ -99,7 +97,7 @@ export default function FriendsFeed() {
     [userId, friendIds]
   );
 
-  // -------- Helpers (no joins) --------
+  // Helpers
   const fetchProfiles = useCallback(async (userIds: string[]) => {
     if (!userIds.length) return new Map<string, Profile>();
     const uniq = Array.from(new Set(userIds));
@@ -114,45 +112,68 @@ export default function FriendsFeed() {
     return map;
   }, []);
 
-  // Safe counts: if hearts/bookmarks table or RLS isn’t ready, swallow errors and continue
-  const fetchCounts = useCallback(async (recipeIds: string[]) => {
-    const ids = Array.from(new Set(recipeIds));
-    const empty = { hearts: new Map<string, number>(), bookmarks: new Map<string, number>() };
-    if (!ids.length) return empty;
+  // Counts + "by me" status. If RLS/tables block, default to empty maps.
+  const fetchCountsAndMine = useCallback(
+    async (recipeIds: string[]) => {
+      const ids = Array.from(new Set(recipeIds));
+      const empty = {
+        hearts: new Map<string, number>(),
+        bookmarks: new Map<string, number>(),
+        myHearts: new Set<string>(),
+        myBookmarks: new Set<string>(),
+      };
+      if (!ids.length || !userId) return empty;
 
-    try {
-      const [{ data: heartRows, error: heartErr }, { data: bookmarkRows, error: bmErr }] =
-        await Promise.all([
+      try {
+        const [
+          { data: heartRows, error: heartErr },
+          { data: bookmarkRows, error: bmErr },
+          { data: myHeartsRows, error: myHeartsErr },
+          { data: myBookmarksRows, error: myBmErr },
+        ] = await Promise.all([
           supabase.from('hearts').select('recipe_id').in('recipe_id', ids),
           supabase.from('bookmarks').select('recipe_id').in('recipe_id', ids),
+          supabase
+            .from('hearts')
+            .select('recipe_id')
+            .eq('user_id', userId)
+            .in('recipe_id', ids),
+          supabase
+            .from('bookmarks')
+            .select('recipe_id')
+            .eq('user_id', userId)
+            .in('recipe_id', ids),
         ]);
 
-      // If RLS blocks or tables don't exist, bail quietly
-      if (heartErr || bmErr) return empty;
+        if (heartErr || bmErr || myHeartsErr || myBmErr) return empty;
 
-      const hearts = new Map<string, number>();
-      (heartRows ?? []).forEach((r: any) => {
-        hearts.set(r.recipe_id, (hearts.get(r.recipe_id) ?? 0) + 1);
-      });
+        const hearts = new Map<string, number>();
+        (heartRows ?? []).forEach((r: any) =>
+          hearts.set(r.recipe_id, (hearts.get(r.recipe_id) ?? 0) + 1)
+        );
 
-      const bookmarks = new Map<string, number>();
-      (bookmarkRows ?? []).forEach((r: any) => {
-        bookmarks.set(r.recipe_id, (bookmarks.get(r.recipe_id) ?? 0) + 1);
-      });
+        const bookmarks = new Map<string, number>();
+        (bookmarkRows ?? []).forEach((r: any) =>
+          bookmarks.set(r.recipe_id, (bookmarks.get(r.recipe_id) ?? 0) + 1)
+        );
 
-      return { hearts, bookmarks };
-    } catch {
-      return empty;
-    }
-  }, []);
+        const myHearts = new Set<string>((myHeartsRows ?? []).map((r: any) => r.recipe_id));
+        const myBookmarks = new Set<string>((myBookmarksRows ?? []).map((r: any) => r.recipe_id));
 
-  // Visibility rule (friends): show anything not explicitly "private"
+        return { hearts, bookmarks, myHearts, myBookmarks };
+      } catch {
+        return empty;
+      }
+    },
+    [userId]
+  );
+
   const isFriendVisible = (visibility: string | null | undefined) => {
     const v = (visibility ?? '').trim().toLowerCase();
     return v !== 'private';
   };
 
-  // -------- Page fetch (recipes → profiles → counts) --------
+  // Fetch page (recipes → profiles → counts+mine)
   const fetchPage = useCallback(
     async (nextPage: number) => {
       if (fetchingPageRef.current === nextPage) return;
@@ -170,7 +191,6 @@ export default function FriendsFeed() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // 1) Recipes (no join)
         const { data: recipeRows, error: recipeErr } = await supabase
           .from('recipes')
           .select(
@@ -180,35 +200,34 @@ export default function FriendsFeed() {
             'user_id',
             visibleUserIds.length
               ? visibleUserIds
-              : ['00000000-0000-0000-0000-000000000000'] // guard in()
+              : ['00000000-0000-0000-0000-000000000000']
           )
           .order('created_at', { ascending: false })
           .range(from, to);
 
         if (recipeErr) throw recipeErr;
 
-        // 2) Apply friend visibility
         const filtered: Recipe[] =
           (recipeRows as Recipe[] | null)?.filter((r) => {
             if (r.user_id === userId) return true;
             return isFriendVisible(r.visibility);
           }) ?? [];
 
-        // 3) De-dupe by id
         const newOnes = filtered.filter((r) => !seenIdsRef.current.has(r.id));
         newOnes.forEach((r) => seenIdsRef.current.add(r.id));
 
-        // 4) Profiles for new rows
         const profileMap = await fetchProfiles(newOnes.map((r) => r.user_id));
-
-        // 5) Counts for new rows (safe; won’t break feed)
-        const { hearts, bookmarks } = await fetchCounts(newOnes.map((r) => r.id));
+        const { hearts, bookmarks, myHearts, myBookmarks } = await fetchCountsAndMine(
+          newOnes.map((r) => r.id)
+        );
 
         const withMeta: Recipe[] = newOnes.map((r) => ({
           ...r,
           _profile: profileMap.get(r.user_id) ?? null,
           _heartCount: hearts.get(r.id) ?? 0,
           _bookmarkCount: bookmarks.get(r.id) ?? 0,
+          _heartedByMe: myHearts.has(r.id),
+          _bookmarkedByMe: myBookmarks.has(r.id),
         }));
 
         const gotAll = (recipeRows?.length ?? 0) < PAGE_SIZE;
@@ -217,17 +236,16 @@ export default function FriendsFeed() {
         setHasMore(!gotAll);
         setPage(nextPage);
       } catch (e: any) {
-        // show error but keep UI alive
         setMsg(e.message ?? 'Failed to load friends feed.');
       } finally {
         setLoading(false);
         fetchingPageRef.current = null;
       }
     },
-    [userId, visibleUserIds, fetchProfiles, fetchCounts]
+    [userId, visibleUserIds, fetchProfiles, fetchCountsAndMine]
   );
 
-  // reset when user/friends change
+  // Reset on dependency change
   useEffect(() => {
     if (!userId) return;
     setRows([]);
@@ -237,12 +255,11 @@ export default function FriendsFeed() {
     fetchPage(0);
   }, [userId, friendIds.join('|'), fetchPage]);
 
-  // infinite scroll
+  // Infinite scroll
   useEffect(() => {
     if (!hasMore || loading) return;
     const el = sentinelRef.current;
     if (!el) return;
-
     const io = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
@@ -252,18 +269,102 @@ export default function FriendsFeed() {
       },
       { rootMargin: '800px 0px' }
     );
-
     io.observe(el);
     return () => io.disconnect();
   }, [hasMore, loading, page, fetchPage]);
 
-  // modal
-  function openRecipe(r: Recipe) { setSelected(r); setOpen(true); }
-  function closeRecipe() { setOpen(false); setSelected(null); }
+  // Modal handlers
+  function openRecipe(r: Recipe) {
+    setSelected(r);
+    setOpen(true);
+  }
+  function closeRecipe() {
+    setOpen(false);
+    setSelected(null);
+  }
 
-  // ---- Inline layout caps (so iPad doesn’t go full width) ----
+  // Toggle heart/bookmark (optimistic)
+  const toggleHeart = async (r: Recipe) => {
+    if (!userId) return;
+    const wasOn = !!r._heartedByMe;
+    setRows((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? {
+              ...x,
+              _heartedByMe: !wasOn,
+              _heartCount: (x._heartCount ?? 0) + (wasOn ? -1 : 1),
+            }
+          : x
+      )
+    );
+    try {
+      if (wasOn) {
+        await supabase.from('hearts').delete().eq('recipe_id', r.id).eq('user_id', userId);
+      } else {
+        await supabase.from('hearts').insert({ recipe_id: r.id, user_id: userId });
+      }
+    } catch {
+      // rollback on failure
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? {
+                ...x,
+                _heartedByMe: wasOn,
+                _heartCount: (x._heartCount ?? 0) + (wasOn ? 1 : -1),
+              }
+            : x
+        )
+      );
+    }
+  };
+
+  const toggleBookmark = async (r: Recipe) => {
+    if (!userId) return;
+    const wasOn = !!r._bookmarkedByMe;
+    setRows((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? {
+              ...x,
+              _bookmarkedByMe: !wasOn,
+              _bookmarkCount:
+                x.user_id === userId
+                  ? (x._bookmarkCount ?? 0) + (wasOn ? -1 : 1)
+                  : x._bookmarkCount, // count only visible for own recipes
+            }
+          : x
+      )
+    );
+    try {
+      if (wasOn) {
+        await supabase.from('bookmarks').delete().eq('recipe_id', r.id).eq('user_id', userId);
+      } else {
+        await supabase.from('bookmarks').insert({ recipe_id: r.id, user_id: userId });
+      }
+    } catch {
+      // rollback on failure
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? {
+                ...x,
+                _bookmarkedByMe: wasOn,
+                _bookmarkCount:
+                  x.user_id === userId
+                    ? (x._bookmarkCount ?? 0) + (wasOn ? 1 : -1)
+                    : x._bookmarkCount,
+              }
+            : x
+        )
+      );
+    }
+  };
+
+  // ---- Layout (inline styles) ----
   const containerStyle: React.CSSProperties = {
-    maxWidth: 560,   // adjust if you want narrower/wider on tablets
+    maxWidth: 560, // keep column narrow on iPad/desktop
     width: '100%',
     margin: '0 auto',
   };
@@ -284,14 +385,31 @@ export default function FriendsFeed() {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   };
+  // space-between: "Added on ..." left, buttons right
   const actionsRowStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
-    gap: 14,
+    justifyContent: 'space-between',
     padding: '6px 10px 8px 10px',
-    color: '#374151',
     fontSize: 13,
+    color: '#374151',
   };
+  const actionsRightStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 14,
+  };
+  const iconBtnStyle: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    cursor: 'pointer',
+    background: 'transparent',
+    border: 'none',
+    padding: 0,
+    color: '#374151',
+  };
+  const iconMuted: React.CSSProperties = { color: '#9CA3AF' };
 
   return (
     <main style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
@@ -304,7 +422,6 @@ export default function FriendsFeed() {
           </p>
         </div>
 
-        {/* Error */}
         {msg && (
           <div
             style={{
@@ -321,7 +438,6 @@ export default function FriendsFeed() {
           </div>
         )}
 
-        {/* Empty state */}
         {!loading && rows.length === 0 && !msg && (
           <div
             style={{
@@ -337,11 +453,10 @@ export default function FriendsFeed() {
           </div>
         )}
 
-        {/* Single-column feed */}
         <div>
           {rows.map((r) => (
             <article key={r.id} style={articleStyle}>
-              {/* compact avatar + bold name inline */}
+              {/* compact avatar row */}
               <div style={headerRowStyle}>
                 <Avatar
                   src={r._profile?.avatar_url ?? null}
@@ -353,7 +468,7 @@ export default function FriendsFeed() {
                 </span>
               </div>
 
-              {/* image tile w/ bottom overlay (your component) */}
+              {/* image tile */}
               <div style={{ paddingLeft: 0, paddingRight: 0 }}>
                 <RecipeTile
                   title={r.title}
@@ -364,37 +479,42 @@ export default function FriendsFeed() {
                 />
               </div>
 
-              {/* compact meta/actions row */}
+              {/* actions: Added on ... (left) + heart/bookmark (right) */}
               <div style={actionsRowStyle}>
-                <span
-                  title={r.created_at ? new Date(r.created_at).toLocaleString() : undefined}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#6b7280' }}
-                >
-                  <CalendarIcon />
-                  {r.created_at ? formatDate(r.created_at) : '—'}
+                <span style={{ color: '#6b7280' }}>
+                  Added on {r.created_at ? formatDate(r.created_at) : '—'}
                 </span>
 
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <HeartIcon />
-                  {r._heartCount ?? 0}
-                </span>
+                <div style={actionsRightStyle}>
+                  <button
+                    type="button"
+                    onClick={() => toggleHeart(r)}
+                    aria-label={r._heartedByMe ? 'Remove heart' : 'Add heart'}
+                    style={iconBtnStyle}
+                    title={r._heartedByMe ? 'Unheart' : 'Heart'}
+                  >
+                    <HeartIcon filled={!!r._heartedByMe} />
+                    <span>{r._heartCount ?? 0}</span>
+                  </button>
 
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    color: r.user_id === userId ? '#374151' : '#9CA3AF',
-                  }}
-                >
-                  <BookmarkIcon />
-                  {r.user_id === userId ? (r._bookmarkCount ?? 0) : null}
-                </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleBookmark(r)}
+                    aria-label={r._bookmarkedByMe ? 'Remove bookmark' : 'Add bookmark'}
+                    style={{
+                      ...iconBtnStyle,
+                      ...(r.user_id !== userId ? iconMuted : undefined),
+                    }}
+                    title={r._bookmarkedByMe ? 'Remove bookmark' : 'Bookmark'}
+                  >
+                    <BookmarkIcon filled={!!r._bookmarkedByMe} />
+                    {r.user_id === userId ? <span>{r._bookmarkCount ?? 0}</span> : null}
+                  </button>
+                </div>
               </div>
             </article>
           ))}
 
-          {/* Initial skeletons */}
           {loading && rows.length === 0 && (
             <div style={{ padding: 16 }}>
               {[...Array(3)].map((_, i) => (
@@ -411,10 +531,7 @@ export default function FriendsFeed() {
           )}
         </div>
 
-        {/* Infinite scroll sentinel */}
         <div ref={sentinelRef} style={{ height: 32 }} />
-
-        {/* Shared modal (same as your other pages) */}
         <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
       </div>
     </main>
@@ -427,24 +544,17 @@ function formatDate(iso: string) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-/** inline SVG icons (no deps) */
-function CalendarIcon() {
+/** Icons with "filled" state */
+function HeartIcon({ filled = false }: { filled?: boolean }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
-      <path d="M7 2a1 1 0 1 1 2 0v1h6V2a1 1 0 1 1 2 0v1h1a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h1V2Zm-1 5h12a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a1 1 0 0 1 1-1Z" />
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill={filled ? '#ef4444' : 'none'} stroke="#ef4444" strokeWidth="2">
+      <path d="M20.84 4.61c-1.54-1.42-3.98-1.42-5.52 0L12 7.17l-3.32-2.56c-1.54-1.42-3.98-1.42-5.52 0-1.82 1.68-1.82 4.4 0 6.08L12 21l8.84-10.31c1.82-1.68 1.82-4.4 0-6.08z" />
     </svg>
   );
 }
-function HeartIcon() {
+function BookmarkIcon({ filled = false }: { filled?: boolean }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
-      <path d="M12.001 5.53C10.2 3.5 6.9 3.5 5.1 5.53c-1.92 2.17-1.45 5.3.93 7.06l5.97 4.55 5.97-4.55c2.38-1.76 2.85-4.89.93-7.06-1.8-2.03-5.1-2.03-6.9 0l-.1.11-.1-.11Z" />
-    </svg>
-  );
-}
-function BookmarkIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill={filled ? '#111827' : 'none'} stroke="#111827" strokeWidth="2">
       <path d="M6 3a2 2 0 0 0-2 2v16l8-4 8 4V5a2 2 0 0 0-2-2H6Z" />
     </svg>
   );
