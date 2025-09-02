@@ -16,7 +16,7 @@ type Recipe = {
   source_url: string | null;
   created_at: string | null;
   visibility?: string | null;
-  _profile?: Profile | null;
+  _profile?: Profile | null; // attached after fetch
 };
 
 type Profile = {
@@ -40,11 +40,11 @@ export default function FriendsFeed() {
   const [hasMore, setHasMore] = useState(true);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // dedupe + re-entrancy guards
+  // de-dupe & re-entrancy guards
   const seenIdsRef = useRef<Set<string>>(new Set());
   const fetchingPageRef = useRef<number | null>(null);
 
-  // modal state
+  // modal state (match public page)
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -223,25 +223,59 @@ export default function FriendsFeed() {
     setSelected(null);
   }
 
+  // ------- INLINE LAYOUT (so it works even if Tailwind classes don't apply) -------
+  const containerStyle: React.CSSProperties = {
+    // cap the width so iPad/Desktop never get huge tiles
+    maxWidth: 560,          // tweak to taste: 520/560/600
+    width: '100%',
+    margin: '0 auto',
+  };
+
+  const headerRowStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '12px 16px',
+    borderBottom: '1px solid #e5e7eb',
+  };
+
+  const articleStyle: React.CSSProperties = {
+    paddingTop: 16,
+    borderBottom: '1px solid #e5e7eb',
+  };
+
+  const boldNameStyle: React.CSSProperties = {
+    fontWeight: 700,
+    lineHeight: 1.1,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  };
+
   return (
-    <main className="w-full flex justify-center">
-      {/* Responsive centered column:
-         - default: max-w-420px (phones)
-         - sm:     max-w-500px (small tablets)
-         - md+:    max-w-560px (iPad / desktop)
-      */}
-      <div className="w-full max-w-[420px] sm:max-w-[500px] md:max-w-[560px] mx-auto">
+    <main style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+      <div style={containerStyle}>
         {/* Header */}
-        <div className="px-4 py-3 border-b border-neutral-200">
-          <h1 className="text-xl font-semibold m-0">Friends</h1>
-          <p className="text-sm text-neutral-500 m-0">
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Friends</h1>
+          <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>
             Your recipes + friends’ recipes (public & friends-only)
           </p>
         </div>
 
         {/* Error */}
         {msg && (
-          <div className="m-4 rounded-md bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+          <div
+            style={{
+              margin: 16,
+              border: '1px solid #fecaca',
+              background: '#fef2f2',
+              color: '#b91c1c',
+              borderRadius: 8,
+              padding: 12,
+              fontSize: 14,
+            }}
+          >
             {msg}
           </div>
         )}
@@ -263,23 +297,23 @@ export default function FriendsFeed() {
         )}
 
         {/* Single-column feed */}
-        <div className="flex flex-col">
+        <div>
           {rows.map((r) => (
-            <article key={r.id} className="pt-4 border-b border-neutral-200">
-              {/* Header: bigger avatar + bold name inline */}
-              <div className="px-4 pb-3 flex items-center gap-3">
+            <article key={r.id} style={articleStyle}>
+              {/* Avatar + bold name INLINE (never below) */}
+              <div style={headerRowStyle}>
                 <Avatar
                   src={r._profile?.avatar_url ?? null}
                   name={r._profile?.display_name ?? 'User'}
-                  size={40} // bumped from 32 → 40
+                  size={48} // larger avatar
                 />
-                <span className="font-semibold">
+                <span style={boldNameStyle} title={r._profile?.display_name ?? 'Unknown User'}>
                   {r._profile?.display_name ?? 'Unknown User'}
                 </span>
               </div>
 
               {/* Image tile with shaded bottom overlay (your RecipeTile) */}
-              <div className="px-0">
+              <div style={{ paddingLeft: 0, paddingRight: 0 }}>
                 <RecipeTile
                   title={r.title}
                   types={r.recipe_types ?? []}
@@ -289,23 +323,20 @@ export default function FriendsFeed() {
                 />
               </div>
 
-              <div className="h-2" />
+              <div style={{ height: 8 }} />
             </article>
           ))}
 
           {/* Skeletons */}
           {loading && rows.length === 0 && (
-            <div className="p-4">
+            <div style={{ padding: 16 }}>
               {[...Array(3)].map((_, i) => (
-                <div key={i} className="mb-6">
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-neutral-200" />
-                    <div className="h-3 w-32 bg-neutral-200 rounded" />
+                <div key={i} style={{ marginBottom: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 9999, background: '#e5e7eb' }} />
+                    <div style={{ height: 12, width: 128, background: '#e5e7eb', borderRadius: 6 }} />
                   </div>
-                  <div
-                    className="w-full rounded-md bg-neutral-200"
-                    style={{ aspectRatio: '1 / 1' }}
-                  />
+                  <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#e5e7eb', borderRadius: 8 }} />
                 </div>
               ))}
             </div>
@@ -313,7 +344,7 @@ export default function FriendsFeed() {
         </div>
 
         {/* Infinite scroll sentinel */}
-        <div ref={sentinelRef} className="h-12" />
+        <div ref={sentinelRef} style={{ height: 48 }} />
 
         {/* Shared modal */}
         <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
@@ -322,11 +353,11 @@ export default function FriendsFeed() {
   );
 }
 
-/** Avatar with initials fallback */
+/** Avatar with initials fallback (inline styles; size-controlled) */
 function Avatar({
   src,
   name,
-  size = 40,
+  size = 48,
 }: {
   src: string | null;
   name: string;
@@ -362,7 +393,7 @@ function Avatar({
         color: '#374151',
         display: 'grid',
         placeItems: 'center',
-        fontSize: 13,
+        fontSize: 14,
         fontWeight: 700,
       }}
       aria-label={name}
