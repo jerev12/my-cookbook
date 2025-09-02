@@ -1,170 +1,331 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
+import RecipeModal from '@/app/components/RecipeModal';
 
-type Recipe = {
+type Profile = {
   id: string;
-  title: string;
-  photo_url: string | null;
-  cuisine: string | null;
-  source_url: string | null;
-  visibility: 'public' | 'friends' | 'private';
-  created_at: string;
-  user_id: string; // author id
+  display_name: string | null;
+  avatar_url: string | null;
 };
 
+type RecipeRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  recipes_types: string | null;
+  photo_url: string | null;
+  privacy: 'public' | 'friends' | 'private';
+  created_at: string;
+  profiles?: Profile; // joined profile
+};
+
+const PAGE_SIZE = 12;
+
 export default function FriendsPage() {
-  const [loading, setLoading] = useState(true);
-  const [authMissing, setAuthMissing] = useState(false);
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [friendIds, setFriendIds] = useState<string[]>([]);
+  const [recipes, setRecipes] = useState<RecipeRow[]>([]);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [activeRecipeId, setActiveRecipeId] = useState<string | null>(null);
+
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  // Get current user id
   useEffect(() => {
-    let active = true;
     (async () => {
-      setLoading(true);
-      setErrorMsg(null);
-
-      // 1) Must be signed in to have a friends feed
-      const { data: userRes, error: userErr } = await supabase.auth.getUser();
-      if (userErr || !userRes?.user) {
-        if (!active) return;
-        setAuthMissing(true);
-        setLoading(false);
+      const { data, error } = await supabase.auth.getUser();
+      if (error) {
+        setErrorMsg(error.message);
         return;
       }
-      const myId = userRes.user.id;
-
-      // 2) Get my friend ids (public table, but we filter by me)
-      const { data: friendRows, error: fErr } = await supabase
-        .from('friends')
-        .select('friend_id')
-        .eq('user_id', myId);
-
-      if (fErr) {
-        if (!active) return;
-        setErrorMsg(fErr.message);
-        setLoading(false);
-        return;
-      }
-
-      const friendIds = (friendRows ?? []).map((r) => r.friend_id);
-      if (friendIds.length === 0) {
-        if (!active) return;
-        setRecipes([]);
-        setLoading(false);
-        return;
-      }
-
-      // 3) Load recipes from those authors.
-      // RLS already hides anything private (and allows public + friends for you).
-      // We filter to public/friends purely for efficiency.
-      const { data: recs, error: rErr } = await supabase
-        .from('recipes')
-        .select('id,title,photo_url,cuisine,source_url,visibility,created_at,user_id')
-        .in('user_id', friendIds)
-        .in('visibility', ['public', 'friends'])
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (rErr) {
-        if (!active) return;
-        setErrorMsg(rErr.message);
-      } else {
-        if (!active) return;
-        setRecipes((recs as Recipe[]) ?? []);
-      }
-
-      setLoading(false);
+      setUserId(data.user?.id ?? null);
     })();
-
-    return () => {
-      active = false;
-    };
   }, []);
 
-  if (authMissing) {
-    return (
-      <div style={{ padding: 16 }}>
-        <h1 style={{ margin: 0, fontSize: 22 }}>Friends</h1>
-        <p style={{ marginTop: 8, color: '#606375' }}>
-          Please <Link href="/login">sign in</Link> to view your friends feed.
-        </p>
-      </div>
+  // Fetch friend ids (accepted, either direction)
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      const { data, error } = await supabase
+        .from('friendships')
+        .select('requester_id, addressee_id')
+        .eq('status', 'accepted')
+        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
+
+      if (error) {
+        setErrorMsg(error.message);
+        return;
+      }
+
+      const ids =
+        data?.map((row) =>
+          row.requester_id === userId ? row.addressee_id : row.requester_id
+        ) ?? [];
+
+      setFriendIds(ids);
+    })();
+  }, [userId]);
+
+  const visibleUserIds = useMemo(() => {
+    // Only fetch from you + friends (not “everyone public”)
+    return userId ? [userId, ...friendIds] : friendIds;
+  }, [userId, friendIds]);
+
+  const fetchPage = useCallback(
+    async (nextPage: number) => {
+      if (!userId || visibleUserIds.length === 0) {
+        // You might have no friends yet; still show your own recipes
+        if (!userId) return;
+      }
+      setLoading(true);
+      setErrorMsg(null);
+      try {
+        const from = nextPage * PAGE_SIZE;
+        const to = from + PAGE_SIZE - 1;
+
+        // Single query over just you + your friends.
+        // We’ll client-filter away friends’ "private" recipes (your own still show).
+        const { data, error } = await supabase
+          .from('recipes')
+          .select(
+            `
+              id,
+              user_id,
+              title,
+              recipes_types,
+              photo_url,
+              privacy,
+              created_at,
+              profiles:profiles (
+                id,
+                display_name,
+                avatar_url
+              )
+            `
+          )
+          .in('user_id', userId ? [userId, ...friendIds] : friendIds)
+          .order('created_at', { ascending: false })
+          .range(from, to);
+
+        if (error) throw error;
+
+        const filtered =
+          (data ?? []).filter((r) => {
+            if (r.user_id === userId) return true; // always see your own
+            return r.privacy === 'public' || r.privacy === 'friends';
+          }) as RecipeRow[];
+
+        // If the server returned fewer than PAGE_SIZE, we *might* be done.
+        // However, because we filter on the client, we should determine hasMore
+        // by checking if the raw server response was < PAGE_SIZE.
+        const gotAll = (data?.length ?? 0) < PAGE_SIZE;
+
+        setRecipes((prev) => [...prev, ...filtered]);
+        setHasMore(!gotAll);
+        setPage(nextPage);
+      } catch (e: any) {
+        setErrorMsg(e.message ?? 'Failed to load feed.');
+      } finally {
+        setLoading(false);
+      }
+    },
+    [userId, friendIds, visibleUserIds.length]
+  );
+
+  // Initial load
+  useEffect(() => {
+    if (!userId) return;
+    setRecipes([]);
+    setPage(0);
+    setHasMore(true);
+    // Kick off first page
+    fetchPage(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, friendIds.join('|')]);
+
+  // Infinite scroll observer
+  useEffect(() => {
+    if (!hasMore || loading) return;
+    const el = sentinelRef.current;
+    if (!el) return;
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        const [entry] = entries;
+        if (entry.isIntersecting && !loading && hasMore) {
+          fetchPage(page + 1);
+        }
+      },
+      { rootMargin: '800px 0px' }
     );
-  }
+
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasMore, loading, page, fetchPage]);
+
+  const handleOpen = (id: string) => {
+    setActiveRecipeId(id);
+    setIsModalOpen(true);
+  };
+
+  const handleClose = () => {
+    setIsModalOpen(false);
+    setActiveRecipeId(null);
+  };
 
   return (
-    <div style={{ padding: 16, maxWidth: 1100, margin: '0 auto' }}>
-      <h1 style={{ margin: 0, fontSize: 22 }}>Friends</h1>
-      <p style={{ marginTop: 8, color: '#606375' }}>
-        Recipes shared by your friends (public & friends‑only).
-      </p>
-
-      {loading ? (
-        <div style={{ marginTop: 12 }}>Loading…</div>
-      ) : errorMsg ? (
-        <div style={{ marginTop: 12, color: '#b42318' }}>{errorMsg}</div>
-      ) : recipes.length === 0 ? (
-        <div
-          style={{
-            marginTop: 12,
-            padding: 16,
-            border: '1px solid #e6e7ee',
-            borderRadius: 10,
-            background: '#fff',
-            color: '#606375',
-          }}
-        >
-          <b>No posts yet.</b> Add some friends and you’ll see their recipes here.
+    <main className="w-full flex justify-center">
+      <div className="w-full max-w-[420px]">
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-neutral-200">
+          <h1 className="text-xl font-semibold">Friends</h1>
+          <p className="text-sm text-neutral-500">
+            Your recipes + friends’ recipes (public & friends-only)
+          </p>
         </div>
-      ) : (
-        <div
-          style={{
-            marginTop: 12,
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(240px,1fr))',
-            gap: 16,
-          }}
-        >
+
+        {/* Error */}
+        {errorMsg && (
+          <div className="m-4 rounded-md bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+            {errorMsg}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!loading && recipes.length === 0 && (
+          <div className="px-4 py-12 text-center text-neutral-500">
+            No recipes to show yet.
+          </div>
+        )}
+
+        {/* Feed */}
+        <div className="flex flex-col divide-y divide-neutral-200">
           {recipes.map((r) => (
-            <article
-              key={r.id}
-              style={{
-                border: '1px solid #eee',
-                borderRadius: 12,
-                background: '#fff',
-                padding: 12,
-              }}
-            >
-              {r.photo_url ? (
-                <img
-                  src={r.photo_url}
-                  alt={r.title}
-                  style={{ width: '100%', aspectRatio: '16/9', objectFit: 'cover', borderRadius: 8 }}
+            <article key={r.id} className="pt-4">
+              {/* Post header */}
+              <div className="px-4 pb-3 flex items-center gap-3">
+                <Avatar
+                  src={r.profiles?.avatar_url ?? null}
+                  name={r.profiles?.display_name ?? 'User'}
                 />
-              ) : null}
-              <div style={{ fontWeight: 600, marginTop: 8 }}>{r.title}</div>
-              <div style={{ color: '#666', fontSize: 13 }}>{r.cuisine || '—'}</div>
-              <div style={{ color: '#7a7d8f', fontSize: 12, marginTop: 6 }}>
-                {r.visibility} • {new Date(r.created_at).toLocaleString()}
+                <div className="flex flex-col leading-tight">
+                  <span className="font-medium">
+                    {r.profiles?.display_name ?? 'Unknown User'}
+                  </span>
+                  {/* Optional timestamp: */}
+                  {/* <span className="text-xs text-neutral-500">
+                    {new Date(r.created_at).toLocaleString()}
+                  </span> */}
+                </div>
               </div>
-              {r.source_url ? (
-                <a
-                  href={r.source_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ display: 'inline-block', marginTop: 8, fontSize: 13 }}
+
+              {/* Image + overlay */}
+              <div className="px-0">
+                <div
+                  className="relative w-full overflow-hidden"
+                  style={{ aspectRatio: '4 / 3' }}
                 >
-                  Open Source
-                </a>
-              ) : null}
+                  {/* Clickable image */}
+                  <button
+                    onClick={() => handleOpen(r.id)}
+                    className="absolute inset-0"
+                    aria-label={`Open ${r.title}`}
+                  />
+                  {r.photo_url ? (
+                    <Image
+                      src={r.photo_url}
+                      alt={r.title}
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 420px) 100vw, 420px"
+                      priority={false}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-neutral-200" />
+                  )}
+
+                  {/* Shaded box overlay with title + type (clickable) */}
+                  <div className="absolute bottom-2 left-2">
+                    <button
+                      onClick={() => handleOpen(r.id)}
+                      className="rounded-md bg-black/60 backdrop-blur-[2px] px-3 py-2 text-left"
+                    >
+                      <h3 className="text-white font-semibold leading-snug line-clamp-2">
+                        {r.title}
+                      </h3>
+                      {r.recipes_types && (
+                        <p className="text-white/90 text-xs uppercase mt-0.5">
+                          {r.recipes_types}
+                        </p>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom spacer like IG */}
+              <div className="h-2" />
             </article>
           ))}
+
+          {/* Skeletons */}
+          {loading && recipes.length === 0 && (
+            <div className="p-4">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="mb-6">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-neutral-200" />
+                    <div className="h-3 w-32 bg-neutral-200 rounded" />
+                  </div>
+                  <div className="w-full rounded-md bg-neutral-200" style={{ aspectRatio: '4 / 3' }} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Infinite scroll sentinel */}
+        <div ref={sentinelRef} className="h-12" />
+
+        {/* Modal */}
+        {activeRecipeId && (
+          <RecipeModal
+            open={isModalOpen}
+            onClose={handleClose}
+            // Assuming your modal takes recipeId; adjust if it expects a recipe object
+            recipeId={activeRecipeId}
+          />
+        )}
+      </div>
+    </main>
+  );
+}
+
+/** Minimal avatar with fallback initials */
+function Avatar({ src, name }: { src: string | null; name: string }) {
+  const initials = useMemo(() => {
+    const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
+    return parts.slice(0, 2).map(p => p[0]?.toUpperCase() ?? '').join('') || 'U';
+  }, [name]);
+
+  return src ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={name}
+      className="w-10 h-10 rounded-full object-cover border border-neutral-200"
+    />
+  ) : (
+    <div className="w-10 h-10 rounded-full bg-neutral-300 text-neutral-700 grid place-items-center text-sm font-semibold border border-neutral-200">
+      {initials}
     </div>
   );
 }
