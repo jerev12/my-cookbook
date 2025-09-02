@@ -19,7 +19,7 @@ type RecipeRow = {
   photo_url: string | null;
   privacy: 'public' | 'friends' | 'private';
   created_at: string;
-  profiles?: Profile | null; // single object, not array (thanks to FK-qualified join)
+  profiles?: Profile | null; // single object after normalization
 };
 
 const PAGE_SIZE = 12;
@@ -74,7 +74,7 @@ export default function FriendsPage() {
     })();
   }, [userId]);
 
-  // Only fetch from you + friends (not the whole public)
+  // Only fetch from you + friends (not public from everyone)
   const visibleUserIds = useMemo(() => {
     return userId ? [userId, ...friendIds] : friendIds;
   }, [userId, friendIds]);
@@ -89,8 +89,7 @@ export default function FriendsPage() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // IMPORTANT: Use the FK-qualified join so `profiles` is a single object, not an array.
-        // If your FK name is different, replace recipes_user_id_fkey with your actual FK.
+        // Using FK-qualified join; if FK name differs, Supabase may still return an array—handled below.
         const { data, error } = await supabase
           .from('recipes')
           .select(
@@ -109,17 +108,44 @@ export default function FriendsPage() {
               )
             `
           )
-          .in('user_id', visibleUserIds.length ? visibleUserIds : ['00000000-0000-0000-0000-000000000000'])
+          .in(
+            'user_id',
+            visibleUserIds.length
+              ? visibleUserIds
+              : ['00000000-0000-0000-0000-000000000000']
+          )
           .order('created_at', { ascending: false })
           .range(from, to);
 
         if (error) throw error;
 
+        // ---- Normalization step (handles array/object/null for profiles) ----
+        const normalized: RecipeRow[] = (data ?? []).map((r: any) => {
+          let prof = r.profiles ?? null;
+          if (Array.isArray(prof)) prof = prof[0] ?? null;
+          return {
+            id: r.id,
+            user_id: r.user_id,
+            title: r.title,
+            recipes_types: r.recipes_types ?? null,
+            photo_url: r.photo_url ?? null,
+            privacy: r.privacy,
+            created_at: r.created_at,
+            profiles: prof
+              ? {
+                  id: prof.id ?? null,
+                  display_name: prof.display_name ?? null,
+                  avatar_url: prof.avatar_url ?? null,
+                }
+              : null,
+          };
+        });
+
         // Filter client-side: always show your own; for friends allow public + friends
-        const filtered: RecipeRow[] = (data ?? []).filter((r) => {
+        const filtered = normalized.filter((r) => {
           if (r.user_id === userId) return true;
           return r.privacy === 'public' || r.privacy === 'friends';
-        }) as RecipeRow[];
+        });
 
         const gotAll = (data?.length ?? 0) < PAGE_SIZE;
 
@@ -292,7 +318,6 @@ export default function FriendsPage() {
           <RecipeModal
             open={isModalOpen}
             onClose={handleClose}
-            // If your modal expects a different prop name, adjust here:
             recipeId={activeRecipeId}
           />
         )}
