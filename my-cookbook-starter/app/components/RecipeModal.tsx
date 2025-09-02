@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import { emitRecipeMutation, subscribeRecipeMutations } from '@/lib/recipeSync'; // step 2 uses this, safe-guarded below
+import { emitRecipeMutation, subscribeRecipeMutations } from '@/lib/recipeSync'; // event bus
 
 type Recipe = {
   id: string;
@@ -195,12 +195,11 @@ export default function RecipeModal({
     };
   }, [open, recipe]);
 
-  // ===== Step 2: Hardened subscription to cross-component sync messages =====
+  // ===== subscription to cross-component sync messages (TS-safe with local deltas) =====
   useEffect(() => {
     if (!recipe) return;
 
     if (typeof subscribeRecipeMutations !== 'function') {
-      // If the import failed for any reason, don't crash — just skip syncing.
       console.warn('[RecipeModal] subscribeRecipeMutations not available');
       return;
     }
@@ -210,22 +209,24 @@ export default function RecipeModal({
         if (!recipe || m.id !== recipe.id) return;
 
         if (typeof m.heartDelta === 'number') {
-          setHeartCount((c) => Math.max(0, c + m.heartDelta));
+          const delta = m.heartDelta; // capture to keep TS happy in updater
+          setHeartCount((c) => Math.max(0, c + delta));
         }
         if (typeof m.bookmarkDelta === 'number' && isOwner) {
-          setBookmarkCount((c) => Math.max(0, c + m.bookmarkDelta));
+          const delta = m.bookmarkDelta; // capture for TS
+          setBookmarkCount((c) => Math.max(0, c + delta));
         }
         if (typeof m.heartedByMe === 'boolean') setDidHeart(m.heartedByMe);
         if (typeof m.bookmarkedByMe === 'boolean') setDidSave(m.bookmarkedByMe);
       } catch {
-        // never let the event handler crash the UI
+        // never let the handler crash the UI
       }
     });
 
     return unsubscribe;
   }, [recipe?.id, isOwner]);
 
-  // ===== Step 2: Hardened emit calls (guarded + rollback emits) =====
+  // ===== emits (guarded) =====
   async function toggleHeart() {
     if (!currentUserId || !recipe || busyHeart) return;
     setBusyHeart(true);
@@ -243,7 +244,7 @@ export default function RecipeModal({
         heartedByMe: next,
       });
     } catch {
-      // ignore errors from emitter
+      // ignore
     }
 
     try {
@@ -271,9 +272,7 @@ export default function RecipeModal({
           heartDelta: next ? -1 : +1,
           heartedByMe: !next,
         });
-      } catch {
-        // ignore
-      }
+      } catch {}
     } finally {
       setBusyHeart(false);
     }
@@ -295,9 +294,7 @@ export default function RecipeModal({
         bookmarkDelta: next ? +1 : -1,
         bookmarkedByMe: next,
       });
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     try {
       if (next) {
@@ -324,9 +321,7 @@ export default function RecipeModal({
           bookmarkDelta: next ? -1 : +1,
           bookmarkedByMe: !next,
         });
-      } catch {
-        // ignore
-      }
+      } catch {}
     } finally {
       setBusySave(false);
     }
