@@ -724,6 +724,46 @@ function AddRecipeForm() {
           </div>
         </div>
 
+        {/* ---------- Visibility (pill toggle group) ---------- */}
+        <div style={{ display: 'grid', gap: 6 }}>
+          <label style={{ fontWeight: 600 }}>Who can view my recipe:</label>
+          <div role="radiogroup" aria-label="Who can view my recipe" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <input
+                type="radio"
+                name="visibility"
+                value="public"
+                checked={visibility === 'public'}
+                onChange={() => setVisibility('public')}
+                style={{ display: 'none' }}
+              />
+              <span style={visibility === 'public' ? chipActive : chipBase}>Public</span>
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <input
+                type="radio"
+                name="visibility"
+                value="friends"
+                checked={visibility === 'friends'}
+                onChange={() => setVisibility('friends')}
+                style={{ display: 'none' }}
+              />
+              <span style={visibility === 'friends' ? chipActive : chipBase}>Friends</span>
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <input
+                type="radio"
+                name="visibility"
+                value="private"
+                checked={visibility === 'private'}
+                onChange={() => setVisibility('private')}
+                style={{ display: 'none' }}
+              />
+              <span style={visibility === 'private' ? chipActive : chipBase}>Private</span>
+            </label>
+          </div>
+        </div>
+
         {/* ------------ SIMPLE MODE (default) ------------ */}
         {!useComponents && (
           <>
