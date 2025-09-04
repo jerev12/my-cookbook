@@ -71,29 +71,49 @@ export default function FriendsFeed() {
     };
   }, []);
 
-  // -------- Friend list --------
+  // -------- Friend list (MUTUAL: accepted in either direction) --------
   useEffect(() => {
     if (!userId) return;
     let mounted = true;
-    (async () => {
-      const { data, error } = await supabase
-        .from('friendships')
-        .select('requester_id, addressee_id')
-        .eq('status', 'accepted')
-        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
-      if (!mounted) return;
 
-      if (error) {
-        setMsg(error.message);
+    (async () => {
+      try {
+        // A) I requested them and it was accepted → include addressee_id
+        const { data: outRows, error: outErr } = await supabase
+          .from('friendships')
+          .select('addressee_id')
+          .eq('requester_id', userId)
+          .eq('status', 'accepted');
+
+        // B) They requested me and I accepted → include requester_id
+        const { data: inRows, error: inErr } = await supabase
+          .from('friendships')
+          .select('requester_id')
+          .eq('addressee_id', userId)
+          .eq('status', 'accepted');
+
+        if (!mounted) return;
+
+        if (outErr || inErr) {
+          setMsg((outErr || inErr)?.message ?? 'Failed to load friends.');
+          setFriendIds([]);
+          return;
+        }
+
+        const a = (outRows ?? []).map((r: any) => r.addressee_id);
+        const b = (inRows ?? []).map((r: any) => r.requester_id);
+
+        // combine + dedupe + remove my own id if present
+        const uniq = Array.from(new Set([...a, ...b])).filter((id) => id && id !== userId);
+
+        setFriendIds(uniq);
+      } catch (e: any) {
+        if (!mounted) return;
+        setMsg(e?.message ?? 'Failed to load friends.');
         setFriendIds([]);
-      } else {
-        const ids =
-          data?.map((row: any) =>
-            row.requester_id === userId ? row.addressee_id : row.requester_id
-          ) ?? [];
-        setFriendIds(ids);
       }
     })();
+
     return () => {
       mounted = false;
     };
