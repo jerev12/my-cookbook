@@ -683,7 +683,7 @@ function Avatar({
     borderRadius: '9999px',
     objectFit: 'cover',
     display: 'block',
-    border: '1px solid '#e5e7eb',
+    border: '1px solid #e5e7eb',
     flex: '0 0 auto',
   };
 
