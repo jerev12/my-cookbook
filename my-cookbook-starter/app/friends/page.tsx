@@ -36,16 +36,28 @@ type Profile = {
 };
 
 const PAGE_SIZE = 12;
+const ENV_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+/** Small debug row helper */
+function Mono({ children }: { children: React.ReactNode }) {
+  return (
+    <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>
+      {children}
+    </code>
+  );
+}
 
 export default function FriendsFeed() {
-  // --- DEBUG: which Supabase project are we hitting?
-  console.log('ENV SUPABASE URL =>', process.env.NEXT_PUBLIC_SUPABASE_URL);
-
   const [userId, setUserId] = useState<string | null>(null);
   const [friendIds, setFriendIds] = useState<string[]>([]);
   const [rows, setRows] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
+
+  // debug state (so we can show info on iPad)
+  const [showDebug, setShowDebug] = useState(true);
+  const [rpcRaw, setRpcRaw] = useState<any[] | null>(null);
+  const [lastSample, setLastSample] = useState<{ id: string; user_id: string; visibility?: string | null }[]>([]);
 
   // infinite scroll
   const [page, setPage] = useState(0);
@@ -68,8 +80,6 @@ export default function FriendsFeed() {
       if (!mounted) return;
       if (error) setMsg(error.message);
       setUserId(data.user?.id ?? null);
-      // --- DEBUG
-      console.log('auth userId =>', data.user?.id ?? null);
     })();
     return () => {
       mounted = false;
@@ -82,7 +92,6 @@ export default function FriendsFeed() {
     let mounted = true;
 
     (async () => {
-      // typed RPC result
       type RpcRow = { friend_id: string | null };
       const { data, error } = await supabase.rpc('current_user_friend_ids');
 
@@ -91,22 +100,17 @@ export default function FriendsFeed() {
       if (error) {
         setMsg(error.message);
         setFriendIds([]);
-        // --- DEBUG
-        console.log('RPC current_user_friend_ids ERROR =>', error);
+        setRpcRaw([{ error: error.message }]);
         return;
       }
 
-      // ensure string[] and dedupe safely
+      setRpcRaw((data as any[]) ?? []);
+
       const raw = ((data ?? []) as RpcRow[])
         .map((r) => (r?.friend_id ?? '').trim())
         .filter((id): id is string => !!id && id !== userId);
 
       const uniq: string[] = Array.from(new Set<string>(raw));
-
-      // --- DEBUG
-      console.log('friendIds (rpc raw) =>', data);
-      console.log('friendIds (rpc uniq) =>', uniq);
-
       setFriendIds(uniq);
     })();
 
@@ -114,11 +118,6 @@ export default function FriendsFeed() {
       mounted = false;
     };
   }, [userId]);
-
-  // --- DEBUG: whenever friendIds changes, show final value
-  useEffect(() => {
-    console.log('friendIds (final state) =>', friendIds);
-  }, [friendIds]);
 
   // you + friends
   const visibleUserIds = useMemo(
@@ -162,16 +161,8 @@ export default function FriendsFeed() {
         ] = await Promise.all([
           supabase.from('hearts').select('recipe_id').in('recipe_id', ids),
           supabase.from('bookmarks').select('recipe_id').in('recipe_id', ids),
-          supabase
-            .from('hearts')
-            .select('recipe_id')
-            .eq('user_id', userId)
-            .in('recipe_id', ids),
-          supabase
-            .from('bookmarks')
-            .select('recipe_id')
-            .eq('user_id', userId)
-            .in('recipe_id', ids),
+          supabase.from('hearts').select('recipe_id').eq('user_id', userId).in('recipe_id', ids),
+          supabase.from('bookmarks').select('recipe_id').eq('user_id', userId).in('recipe_id', ids),
         ]);
 
         if (heartErr || bmErr || myHeartsErr || myBmErr) return empty;
@@ -220,27 +211,23 @@ export default function FriendsFeed() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // --- DEBUG: what are we prefiltering by?
-        console.log('visibleUserIds =>', visibleUserIds);
-
         const { data: recipeRows, error: recipeErr } = await supabase
           .from('recipes')
           .select(
             'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
           )
-          .in(
-            'user_id',
-            visibleUserIds.length
-              ? visibleUserIds
-              : ['00000000-0000-0000-0000-000000000000']
-          )
+          .in('user_id', visibleUserIds.length ? visibleUserIds : ['00000000-0000-0000-0000-000000000000'])
           .order('created_at', { ascending: false })
           .range(from, to);
 
-        // --- DEBUG: what did the DB return (before our client filtering)?
-        console.log('recipeRows length =>', recipeRows?.length ?? 0);
-        console.log('first recipe rows (sample) =>', (recipeRows ?? []).slice(0, 3));
         if (recipeErr) throw recipeErr;
+
+        // capture a small sample to show in the debug panel
+        setLastSample(
+          ((recipeRows ?? []) as any[])
+            .slice(0, 3)
+            .map((r) => ({ id: r.id, user_id: r.user_id, visibility: r.visibility }))
+        );
 
         const filtered: Recipe[] =
           (recipeRows as Recipe[] | null)?.filter((r) => {
@@ -343,107 +330,6 @@ export default function FriendsFeed() {
     setSelected(null);
   }
 
-  // ===== TOGGLES with optimistic update + EMIT events for cross-sync =====
-  const toggleHeart = async (r: Recipe) => {
-    if (!userId) return;
-    const wasOn = !!r._heartedByMe;
-
-    // optimistic UI
-    setRows((prev) =>
-      prev.map((x) =>
-        x.id === r.id
-          ? { ...x, _heartedByMe: !wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? -1 : 1) }
-          : x
-      )
-    );
-    // notify others
-    emitRecipeMutation({
-      id: r.id,
-      heartDelta: wasOn ? -1 : +1,
-      heartedByMe: !wasOn,
-    });
-
-    try {
-      if (wasOn) {
-        await supabase.from('hearts').delete().eq('recipe_id', r.id).eq('user_id', userId);
-      } else {
-        await supabase.from('hearts').insert({ recipe_id: r.id, user_id: userId });
-      }
-    } catch {
-      // rollback UI
-      setRows((prev) =>
-        prev.map((x) =>
-          x.id === r.id
-            ? { ...x, _heartedByMe: wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? 1 : -1) }
-            : x
-        )
-      );
-      // rollback notification
-      emitRecipeMutation({
-        id: r.id,
-        heartDelta: wasOn ? +1 : -1,
-        heartedByMe: wasOn,
-      });
-    }
-  };
-
-  const toggleBookmark = async (r: Recipe) => {
-    if (!userId) return;
-    const wasOn = !!r._bookmarkedByMe;
-
-    // optimistic UI (count visible only on own recipes)
-    setRows((prev) =>
-      prev.map((x) =>
-        x.id === r.id
-          ? {
-              ...x,
-              _bookmarkedByMe: !wasOn,
-              _bookmarkCount:
-                x.user_id === userId
-                  ? (x._bookmarkCount ?? 0) + (wasOn ? -1 : 1)
-                  : x._bookmarkCount,
-            }
-          : x
-      )
-    );
-    // notify others
-    emitRecipeMutation({
-      id: r.id,
-      bookmarkDelta: wasOn ? -1 : +1,
-      bookmarkedByMe: !wasOn,
-    });
-
-    try {
-      if (wasOn) {
-        await supabase.from('bookmarks').delete().eq('recipe_id', r.id).eq('user_id', userId);
-      } else {
-        await supabase.from('bookmarks').insert({ recipe_id: r.id, user_id: userId });
-      }
-    } catch {
-      // rollback UI
-      setRows((prev) =>
-        prev.map((x) =>
-          x.id === r.id
-            ? {
-                ...x,
-                _bookmarkedByMe: wasOn,
-                _bookmarkCount:
-                  x.user_id === userId
-                    ? (x._bookmarkCount ?? 0) + (wasOn ? 1 : -1)
-                    : x._bookmarkCount,
-              }
-            : x
-        )
-      );
-      // rollback notification
-      emitRecipeMutation({
-        id: r.id,
-        bookmarkDelta: wasOn ? +1 : -1,
-        bookmarkedByMe: wasOn,
-      });
-    }
-  };
-
   // ---- Layout (inline styles) ----
   const containerStyle: React.CSSProperties = {
     maxWidth: 560, // keep column narrow on iPad/desktop
@@ -493,9 +379,75 @@ export default function FriendsFeed() {
   };
   const iconMuted: React.CSSProperties = { color: '#9CA3AF' };
 
+  // ---- Debug panel styles ----
+  const debugWrap: React.CSSProperties = {
+    margin: 12,
+    padding: 12,
+    border: '1px dashed #cbd5e1',
+    background: '#f8fafc',
+    borderRadius: 8,
+  };
+  const debugRow: React.CSSProperties = { marginBottom: 6, wordBreak: 'break-all' };
+  const debugLabel: React.CSSProperties = { fontWeight: 600, marginRight: 6 };
+
   return (
     <main style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
       <div style={containerStyle}>
+        {/* DEBUG PANEL (can hide) */}
+        {showDebug && (
+          <div style={debugWrap}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>Debug (temporary)</strong>
+              <button
+                onClick={() => setShowDebug(false)}
+                style={{ background: 'none', border: '1px solid #cbd5e1', borderRadius: 6, padding: '4px 8px' }}
+              >
+                Hide
+              </button>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>ENV_SUPABASE_URL:</span>
+              <Mono>{ENV_SUPABASE_URL || '(undefined)'}</Mono>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>auth userId:</span>
+              <Mono>{userId || '(null)'}</Mono>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>friendIds (count):</span>
+              <Mono>{friendIds.length}</Mono>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>friendIds (list):</span>
+              <Mono>{friendIds.join(', ') || '(empty)'}</Mono>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>visibleUserIds:</span>
+              <Mono>{visibleUserIds.join(', ') || '(empty)'}</Mono>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>rows loaded (count):</span>
+              <Mono>{rows.length}</Mono>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>last recipe sample (id,user_id,visibility):</span>
+              <Mono>
+                {lastSample.length
+                  ? JSON.stringify(lastSample)
+                  : '(no rows from query or not fetched yet)'}
+              </Mono>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>RPC raw (first 3):</span>
+              <Mono>{rpcRaw ? JSON.stringify(rpcRaw.slice(0, 3)) : '(null)'}</Mono>
+            </div>
+            <div style={debugRow}>
+              <span style={debugLabel}>loading/hasMore/page:</span>
+              <Mono>{String(loading)} / {String(hasMore)} / {page}</Mono>
+            </div>
+          </div>
+        )}
+
         {/* Page header */}
         <div style={{ padding: '10px 12px', borderBottom: '1px solid #e5e7eb' }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Friends</h1>
