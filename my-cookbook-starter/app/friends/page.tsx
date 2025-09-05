@@ -198,19 +198,11 @@ export default function FriendsFeed() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        const { data: recipeRows, error: recipeErr } = await supabase
-          .from('recipes')
-          .select(
-            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
-          )
-          .in(
-            'user_id',
-            visibleUserIds.length
-              ? visibleUserIds
-              : ['00000000-0000-0000-0000-000000000000']
-          )
-          .order('created_at', { ascending: false })
-          .range(from, to);
+const { data: recipeRows, error: recipeErr } = await supabase
+  .from('recipes')
+  .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility')
+  .order('created_at', { ascending: false })
+  .range(from, to);
 
         if (recipeErr) throw recipeErr;
 
