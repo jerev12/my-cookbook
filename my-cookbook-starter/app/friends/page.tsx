@@ -82,7 +82,10 @@ export default function FriendsFeed() {
     let mounted = true;
 
     (async () => {
+      // typed RPC result
+      type RpcRow = { friend_id: string | null };
       const { data, error } = await supabase.rpc('current_user_friend_ids');
+
       if (!mounted) return;
 
       if (error) {
@@ -93,8 +96,12 @@ export default function FriendsFeed() {
         return;
       }
 
-      const uniq = Array.from(new Set((data ?? []).map((r: any) => r.friend_id)))
-        .filter((id) => id && id !== userId);
+      // ensure string[] and dedupe safely
+      const raw = ((data ?? []) as RpcRow[])
+        .map((r) => (r?.friend_id ?? '').trim())
+        .filter((id): id is string => !!id && id !== userId);
+
+      const uniq: string[] = Array.from(new Set<string>(raw));
 
       // --- DEBUG
       console.log('friendIds (rpc raw) =>', data);
@@ -676,7 +683,7 @@ function Avatar({
     borderRadius: '9999px',
     objectFit: 'cover',
     display: 'block',
-    border: '1px solid #e5e7eb',
+    border: '1px solid '#e5e7eb',
     flex: '0 0 auto',
   };
 
