@@ -4,7 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '../components/RecipeModal';
 import { RecipeTile } from '../components/RecipeBadges';
-import { emitRecipeMutation, subscribeRecipeMutations } from '@/lib/recipeSync';
+import {
+  emitRecipeMutation,
+  subscribeRecipeMutations,
+} from '@/lib/recipeSync';
 
 // Match your public feed's Recipe type and attach client meta
 type Recipe = {
@@ -75,12 +78,14 @@ export default function FriendsFeed() {
 
     (async () => {
       try {
+        // A) I requested them and it was accepted → include addressee_id
         const { data: outRows, error: outErr } = await supabase
           .from('friendships')
           .select('addressee_id')
           .eq('requester_id', userId)
           .eq('status', 'accepted');
 
+        // B) They requested me and I accepted → include requester_id
         const { data: inRows, error: inErr } = await supabase
           .from('friendships')
           .select('requester_id')
@@ -98,7 +103,9 @@ export default function FriendsFeed() {
         const a = (outRows ?? []).map((r: any) => r.addressee_id);
         const b = (inRows ?? []).map((r: any) => r.requester_id);
 
+        // combine + dedupe + remove my own id if present
         const uniq = Array.from(new Set([...a, ...b])).filter((id) => id && id !== userId);
+
         setFriendIds(uniq);
       } catch (e: any) {
         if (!mounted) return;
@@ -133,6 +140,7 @@ export default function FriendsFeed() {
     return map;
   }, []);
 
+  // Counts + "by me" status. If RLS/tables block, default to empty maps.
   const fetchCountsAndMine = useCallback(
     async (recipeIds: string[]) => {
       const ids = Array.from(new Set(recipeIds));
@@ -146,16 +154,26 @@ export default function FriendsFeed() {
 
       try {
         const [
-          { data: heartRows },
-          { data: bookmarkRows },
-          { data: myHeartsRows },
-          { data: myBookmarksRows },
+          { data: heartRows, error: heartErr },
+          { data: bookmarkRows, error: bmErr },
+          { data: myHeartsRows, error: myHeartsErr },
+          { data: myBookmarksRows, error: myBmErr },
         ] = await Promise.all([
           supabase.from('hearts').select('recipe_id').in('recipe_id', ids),
           supabase.from('bookmarks').select('recipe_id').in('recipe_id', ids),
-          supabase.from('hearts').select('recipe_id').eq('user_id', userId).in('recipe_id', ids),
-          supabase.from('bookmarks').select('recipe_id').eq('user_id', userId).in('recipe_id', ids),
+          supabase
+            .from('hearts')
+            .select('recipe_id')
+            .eq('user_id', userId)
+            .in('recipe_id', ids),
+          supabase
+            .from('bookmarks')
+            .select('recipe_id')
+            .eq('user_id', userId)
+            .in('recipe_id', ids),
         ]);
+
+        if (heartErr || bmErr || myHeartsErr || myBmErr) return empty;
 
         const hearts = new Map<string, number>();
         (heartRows ?? []).forEach((r: any) =>
@@ -177,6 +195,11 @@ export default function FriendsFeed() {
     },
     [userId]
   );
+
+  const isFriendVisible = (visibility: string | null | undefined) => {
+    const v = (visibility ?? '').trim().toLowerCase();
+    return v !== 'private';
+  };
 
   // -------- Page fetch (recipes → profiles → counts+mine) --------
   const fetchPage = useCallback(
@@ -207,14 +230,20 @@ export default function FriendsFeed() {
               ? visibleUserIds
               : ['00000000-0000-0000-0000-000000000000']
           )
-          .neq('visibility', 'private')
+          // NEWEST FIRST
           .order('created_at', { ascending: false })
-          .order('id', { ascending: false })
           .range(from, to);
 
         if (recipeErr) throw recipeErr;
 
-        const filtered: Recipe[] = (recipeRows as Recipe[] | null) ?? [];
+        // Keep filtering in JS so friends’ items don’t get lost:
+        // - Always show your own recipes (even private)
+        // - Only show friends’ recipes that are not private
+        const filtered: Recipe[] =
+          (recipeRows as Recipe[] | null)?.filter((r) => {
+            if (r.user_id === userId) return true;
+            return isFriendVisible(r.visibility);
+          }) ?? [];
 
         const newOnes = filtered.filter((r) => !seenIdsRef.current.has(r.id));
         newOnes.forEach((r) => seenIdsRef.current.add(r.id));
@@ -316,6 +345,7 @@ export default function FriendsFeed() {
     if (!userId) return;
     const wasOn = !!r._heartedByMe;
 
+    // optimistic UI
     setRows((prev) =>
       prev.map((x) =>
         x.id === r.id
@@ -323,6 +353,7 @@ export default function FriendsFeed() {
           : x
       )
     );
+    // notify others
     emitRecipeMutation({
       id: r.id,
       heartDelta: wasOn ? -1 : +1,
@@ -336,6 +367,7 @@ export default function FriendsFeed() {
         await supabase.from('hearts').insert({ recipe_id: r.id, user_id: userId });
       }
     } catch {
+      // rollback UI
       setRows((prev) =>
         prev.map((x) =>
           x.id === r.id
@@ -343,6 +375,7 @@ export default function FriendsFeed() {
             : x
         )
       );
+      // rollback notification
       emitRecipeMutation({
         id: r.id,
         heartDelta: wasOn ? +1 : -1,
@@ -355,6 +388,7 @@ export default function FriendsFeed() {
     if (!userId) return;
     const wasOn = !!r._bookmarkedByMe;
 
+    // optimistic UI (count visible only on own recipes)
     setRows((prev) =>
       prev.map((x) =>
         x.id === r.id
@@ -369,6 +403,7 @@ export default function FriendsFeed() {
           : x
       )
     );
+    // notify others
     emitRecipeMutation({
       id: r.id,
       bookmarkDelta: wasOn ? -1 : +1,
@@ -382,6 +417,7 @@ export default function FriendsFeed() {
         await supabase.from('bookmarks').insert({ recipe_id: r.id, user_id: userId });
       }
     } catch {
+      // rollback UI
       setRows((prev) =>
         prev.map((x) =>
           x.id === r.id
@@ -396,6 +432,7 @@ export default function FriendsFeed() {
             : x
         )
       );
+      // rollback notification
       emitRecipeMutation({
         id: r.id,
         bookmarkDelta: wasOn ? +1 : -1,
@@ -406,7 +443,7 @@ export default function FriendsFeed() {
 
   // ---- Layout (inline styles) ----
   const containerStyle: React.CSSProperties = {
-    maxWidth: 560, // iPad-friendly column
+    maxWidth: 560, // keep column narrow on iPad/desktop
     width: '100%',
     margin: '0 auto',
   };
@@ -418,7 +455,7 @@ export default function FriendsFeed() {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
-    padding: '4px 12px',
+    padding: '4px 12px', // compact
   };
   const boldNameStyle: React.CSSProperties = {
     fontWeight: 700,
@@ -427,6 +464,7 @@ export default function FriendsFeed() {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   };
+  // space-between: "Added on ..." left, buttons right
   const actionsRowStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -459,7 +497,7 @@ export default function FriendsFeed() {
         <div style={{ padding: '10px 12px', borderBottom: '1px solid #e5e7eb' }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Friends</h1>
           <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>
-            Non-private recipes from you + your friends, newest first
+            Your recipes + friends’ recipes (non-private)
           </p>
         </div>
 
