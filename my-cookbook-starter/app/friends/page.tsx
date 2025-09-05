@@ -57,7 +57,9 @@ export default function FriendsFeed() {
   // debug state (so we can show info on iPad)
   const [showDebug, setShowDebug] = useState(true);
   const [rpcRaw, setRpcRaw] = useState<any[] | null>(null);
-  const [lastSample, setLastSample] = useState<{ id: string; user_id: string; visibility?: string | null }[]>([]);
+  const [lastSample, setLastSample] = useState<
+    { id: string; user_id: string; visibility?: string | null }[]
+  >([]);
 
   // infinite scroll
   const [page, setPage] = useState(0);
@@ -216,7 +218,12 @@ export default function FriendsFeed() {
           .select(
             'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
           )
-          .in('user_id', visibleUserIds.length ? visibleUserIds : ['00000000-0000-0000-0000-000000000000'])
+          .in(
+            'user_id',
+            visibleUserIds.length
+              ? visibleUserIds
+              : ['00000000-0000-0000-0000-000000000000']
+          )
           .order('created_at', { ascending: false })
           .range(from, to);
 
@@ -329,6 +336,107 @@ export default function FriendsFeed() {
     setOpen(false);
     setSelected(null);
   }
+
+  // ===== TOGGLES with optimistic update + EMIT events for cross-sync =====
+  const toggleHeart = async (r: Recipe) => {
+    if (!userId) return;
+    const wasOn = !!r._heartedByMe;
+
+    // optimistic UI
+    setRows((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? { ...x, _heartedByMe: !wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? -1 : 1) }
+          : x
+      )
+    );
+    // notify others
+    emitRecipeMutation({
+      id: r.id,
+      heartDelta: wasOn ? -1 : +1,
+      heartedByMe: !wasOn,
+    });
+
+    try {
+      if (wasOn) {
+        await supabase.from('hearts').delete().eq('recipe_id', r.id).eq('user_id', userId);
+      } else {
+        await supabase.from('hearts').insert({ recipe_id: r.id, user_id: userId });
+      }
+    } catch {
+      // rollback UI
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? { ...x, _heartedByMe: wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? 1 : -1) }
+            : x
+        )
+      );
+      // rollback notification
+      emitRecipeMutation({
+        id: r.id,
+        heartDelta: wasOn ? +1 : -1,
+        heartedByMe: wasOn,
+      });
+    }
+  };
+
+  const toggleBookmark = async (r: Recipe) => {
+    if (!userId) return;
+    const wasOn = !!r._bookmarkedByMe;
+
+    // optimistic UI (count visible only on own recipes)
+    setRows((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? {
+              ...x,
+              _bookmarkedByMe: !wasOn,
+              _bookmarkCount:
+                x.user_id === userId
+                  ? (x._bookmarkCount ?? 0) + (wasOn ? -1 : 1)
+                  : x._bookmarkCount,
+            }
+          : x
+      )
+    );
+    // notify others
+    emitRecipeMutation({
+      id: r.id,
+      bookmarkDelta: wasOn ? -1 : +1,
+      bookmarkedByMe: !wasOn,
+    });
+
+    try {
+      if (wasOn) {
+        await supabase.from('bookmarks').delete().eq('recipe_id', r.id).eq('user_id', userId);
+      } else {
+        await supabase.from('bookmarks').insert({ recipe_id: r.id, user_id: userId });
+      }
+    } catch {
+      // rollback UI
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? {
+                ...x,
+                _bookmarkedByMe: wasOn,
+                _bookmarkCount:
+                  x.user_id === userId
+                    ? (x._bookmarkCount ?? 0) + (wasOn ? 1 : -1)
+                    : x._bookmarkCount,
+              }
+            : x
+        )
+      );
+      // rollback notification
+      emitRecipeMutation({
+        id: r.id,
+        bookmarkDelta: wasOn ? +1 : -1,
+        bookmarkedByMe: wasOn,
+      });
+    }
+  };
 
   // ---- Layout (inline styles) ----
   const containerStyle: React.CSSProperties = {
@@ -443,7 +551,9 @@ export default function FriendsFeed() {
             </div>
             <div style={debugRow}>
               <span style={debugLabel}>loading/hasMore/page:</span>
-              <Mono>{String(loading)} / {String(hasMore)} / {page}</Mono>
+              <Mono>
+                {String(loading)} / {String(hasMore)} / {page}
+              </Mono>
             </div>
           </div>
         )}
