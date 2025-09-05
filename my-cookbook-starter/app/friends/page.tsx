@@ -38,6 +38,9 @@ type Profile = {
 const PAGE_SIZE = 12;
 
 export default function FriendsFeed() {
+  // --- DEBUG: which Supabase project are we hitting?
+  console.log('ENV SUPABASE URL =>', process.env.NEXT_PUBLIC_SUPABASE_URL);
+
   const [userId, setUserId] = useState<string | null>(null);
   const [friendIds, setFriendIds] = useState<string[]>([]);
   const [rows, setRows] = useState<Recipe[]>([]);
@@ -65,6 +68,8 @@ export default function FriendsFeed() {
       if (!mounted) return;
       if (error) setMsg(error.message);
       setUserId(data.user?.id ?? null);
+      // --- DEBUG
+      console.log('auth userId =>', data.user?.id ?? null);
     })();
     return () => {
       mounted = false;
@@ -83,13 +88,18 @@ export default function FriendsFeed() {
       if (error) {
         setMsg(error.message);
         setFriendIds([]);
+        // --- DEBUG
+        console.log('RPC current_user_friend_ids ERROR =>', error);
         return;
       }
 
       const uniq = Array.from(new Set((data ?? []).map((r: any) => r.friend_id)))
         .filter((id) => id && id !== userId);
 
-      console.log('friendIds (rpc) =>', uniq); // debug
+      // --- DEBUG
+      console.log('friendIds (rpc raw) =>', data);
+      console.log('friendIds (rpc uniq) =>', uniq);
+
       setFriendIds(uniq);
     })();
 
@@ -97,6 +107,11 @@ export default function FriendsFeed() {
       mounted = false;
     };
   }, [userId]);
+
+  // --- DEBUG: whenever friendIds changes, show final value
+  useEffect(() => {
+    console.log('friendIds (final state) =>', friendIds);
+  }, [friendIds]);
 
   // you + friends
   const visibleUserIds = useMemo(
@@ -198,12 +213,26 @@ export default function FriendsFeed() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-const { data: recipeRows, error: recipeErr } = await supabase
-  .from('recipes')
-  .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility')
-  .order('created_at', { ascending: false })
-  .range(from, to);
+        // --- DEBUG: what are we prefiltering by?
+        console.log('visibleUserIds =>', visibleUserIds);
 
+        const { data: recipeRows, error: recipeErr } = await supabase
+          .from('recipes')
+          .select(
+            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
+          )
+          .in(
+            'user_id',
+            visibleUserIds.length
+              ? visibleUserIds
+              : ['00000000-0000-0000-0000-000000000000']
+          )
+          .order('created_at', { ascending: false })
+          .range(from, to);
+
+        // --- DEBUG: what did the DB return (before our client filtering)?
+        console.log('recipeRows length =>', recipeRows?.length ?? 0);
+        console.log('first recipe rows (sample) =>', (recipeRows ?? []).slice(0, 3));
         if (recipeErr) throw recipeErr;
 
         const filtered: Recipe[] =
