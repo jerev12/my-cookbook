@@ -49,16 +49,10 @@ export default function FriendsFeed() {
   // dedupe & re-entrancy guards
   const seenIdsRef = useRef<Set<string>>(new Set());
   const fetchingPageRef = useRef<number | null>(null);
-  const hasMoreRef = useRef<boolean>(true);
 
   // modal
   const [selected, setSelected] = useState<Recipe | null>(null);
   const [open, setOpen] = useState(false);
-
-  // keep hasMoreRef synced
-  useEffect(() => {
-    hasMoreRef.current = hasMore;
-  }, [hasMore]);
 
   // -------- Auth (client) --------
   useEffect(() => {
@@ -81,19 +75,19 @@ export default function FriendsFeed() {
 
     (async () => {
       try {
-        // A) I requested them and it was accepted → include addressee_id
         const { data: outRows, error: outErr } = await supabase
           .from('friendships')
           .select('addressee_id')
           .eq('requester_id', userId)
           .eq('status', 'accepted');
 
-        // B) They requested me and I accepted → include requester_id
         const { data: inRows, error: inErr } = await supabase
           .from('friendships')
           .select('requester_id')
           .eq('addressee_id', userId)
           .eq('status', 'accepted');
+
+        if (!mounted) return;
 
         if (outErr || inErr) {
           setMsg((outErr || inErr)?.message ?? 'Failed to load friends.');
@@ -103,9 +97,9 @@ export default function FriendsFeed() {
 
         const a = (outRows ?? []).map((r: any) => r.addressee_id);
         const b = (inRows ?? []).map((r: any) => r.requester_id);
-        const uniq = Array.from(new Set([...a, ...b])).filter((id) => id && id !== userId);
 
-        if (mounted) setFriendIds(uniq);
+        const uniq = Array.from(new Set([...a, ...b])).filter((id) => id && id !== userId);
+        setFriendIds(uniq);
       } catch (e: any) {
         if (!mounted) return;
         setMsg(e?.message ?? 'Failed to load friends.');
@@ -139,7 +133,6 @@ export default function FriendsFeed() {
     return map;
   }, []);
 
-  // Counts + "by me" status. If RLS/tables block, default to empty maps.
   const fetchCountsAndMine = useCallback(
     async (recipeIds: string[]) => {
       const ids = Array.from(new Set(recipeIds));
@@ -153,18 +146,16 @@ export default function FriendsFeed() {
 
       try {
         const [
-          { data: heartRows, error: heartErr },
-          { data: bookmarkRows, error: bmErr },
-          { data: myHeartsRows, error: myHeartsErr },
-          { data: myBookmarksRows, error: myBmErr },
+          { data: heartRows },
+          { data: bookmarkRows },
+          { data: myHeartsRows },
+          { data: myBookmarksRows },
         ] = await Promise.all([
           supabase.from('hearts').select('recipe_id').in('recipe_id', ids),
           supabase.from('bookmarks').select('recipe_id').in('recipe_id', ids),
           supabase.from('hearts').select('recipe_id').eq('user_id', userId).in('recipe_id', ids),
           supabase.from('bookmarks').select('recipe_id').eq('user_id', userId).in('recipe_id', ids),
         ]);
-
-        if (heartErr || bmErr || myHeartsErr || myBmErr) return empty;
 
         const hearts = new Map<string, number>();
         (heartRows ?? []).forEach((r: any) =>
@@ -205,11 +196,7 @@ export default function FriendsFeed() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // IMPORTANT:
-        // - Include ONLY users in (you + friends)
-        // - Include your own recipes regardless of visibility
-        // - Include friends' recipes only if visibility != 'private'
-        const qb = supabase
+        const { data: recipeRows, error: recipeErr } = await supabase
           .from('recipes')
           .select(
             'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
@@ -220,21 +207,13 @@ export default function FriendsFeed() {
               ? visibleUserIds
               : ['00000000-0000-0000-0000-000000000000']
           )
+          .neq('visibility', 'private')
           .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
           .range(from, to);
-
-        // Add the OR filter (own rows OR non-private)
-        if (userId) {
-          qb.or(`user_id.eq.${userId},visibility.neq.private`);
-        } else {
-          qb.neq('visibility', 'private');
-        }
-
-        const { data: recipeRows, error: recipeErr } = await qb;
 
         if (recipeErr) throw recipeErr;
 
-        // No extra client-side visibility filtering needed now
         const filtered: Recipe[] = (recipeRows as Recipe[] | null) ?? [];
 
         const newOnes = filtered.filter((r) => !seenIdsRef.current.has(r.id));
@@ -277,15 +256,9 @@ export default function FriendsFeed() {
     setHasMore(true);
     seenIdsRef.current.clear();
     fetchPage(0);
-
-    // Prefetch next page once (helps surface friends sooner)
-    const t = setTimeout(() => {
-      if (hasMoreRef.current) fetchPage(1);
-    }, 100);
-    return () => clearTimeout(t);
   }, [userId, friendIds.join('|'), fetchPage]);
 
-  // Infinite scroll — IntersectionObserver
+  // Infinite scroll
   useEffect(() => {
     if (!hasMore || loading) return;
     const el = sentinelRef.current;
@@ -293,7 +266,7 @@ export default function FriendsFeed() {
     const io = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
-        if (entry.isIntersecting && !loading && hasMoreRef.current) {
+        if (entry.isIntersecting && !loading && hasMore) {
           fetchPage(page + 1);
         }
       },
@@ -301,21 +274,7 @@ export default function FriendsFeed() {
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [loading, page, fetchPage, hasMore]);
-
-  // Infinite scroll — window scroll fallback (for iPad/mobile flakiness)
-  useEffect(() => {
-    function onScroll() {
-      const nearBottom =
-        window.innerHeight + window.scrollY >=
-        document.documentElement.scrollHeight - 800;
-      if (nearBottom && !loading && hasMoreRef.current) {
-        fetchPage(page + 1);
-      }
-    }
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [loading, page, fetchPage]);
+  }, [hasMore, loading, page, fetchPage]);
 
   // ===== SUBSCRIBE to cross-component mutations (from RecipeModal, etc.) =====
   useEffect(() => {
@@ -352,9 +311,102 @@ export default function FriendsFeed() {
     setSelected(null);
   }
 
+  // ===== TOGGLES with optimistic update + EMIT events for cross-sync =====
+  const toggleHeart = async (r: Recipe) => {
+    if (!userId) return;
+    const wasOn = !!r._heartedByMe;
+
+    setRows((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? { ...x, _heartedByMe: !wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? -1 : 1) }
+          : x
+      )
+    );
+    emitRecipeMutation({
+      id: r.id,
+      heartDelta: wasOn ? -1 : +1,
+      heartedByMe: !wasOn,
+    });
+
+    try {
+      if (wasOn) {
+        await supabase.from('hearts').delete().eq('recipe_id', r.id).eq('user_id', userId);
+      } else {
+        await supabase.from('hearts').insert({ recipe_id: r.id, user_id: userId });
+      }
+    } catch {
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? { ...x, _heartedByMe: wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? 1 : -1) }
+            : x
+        )
+      );
+      emitRecipeMutation({
+        id: r.id,
+        heartDelta: wasOn ? +1 : -1,
+        heartedByMe: wasOn,
+      });
+    }
+  };
+
+  const toggleBookmark = async (r: Recipe) => {
+    if (!userId) return;
+    const wasOn = !!r._bookmarkedByMe;
+
+    setRows((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? {
+              ...x,
+              _bookmarkedByMe: !wasOn,
+              _bookmarkCount:
+                x.user_id === userId
+                  ? (x._bookmarkCount ?? 0) + (wasOn ? -1 : 1)
+                  : x._bookmarkCount,
+            }
+          : x
+      )
+    );
+    emitRecipeMutation({
+      id: r.id,
+      bookmarkDelta: wasOn ? -1 : +1,
+      bookmarkedByMe: !wasOn,
+    });
+
+    try {
+      if (wasOn) {
+        await supabase.from('bookmarks').delete().eq('recipe_id', r.id).eq('user_id', userId);
+      } else {
+        await supabase.from('bookmarks').insert({ recipe_id: r.id, user_id: userId });
+      }
+    } catch {
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? {
+                ...x,
+                _bookmarkedByMe: wasOn,
+                _bookmarkCount:
+                  x.user_id === userId
+                    ? (x._bookmarkCount ?? 0) + (wasOn ? 1 : -1)
+                    : x._bookmarkCount,
+              }
+            : x
+        )
+      );
+      emitRecipeMutation({
+        id: r.id,
+        bookmarkDelta: wasOn ? +1 : -1,
+        bookmarkedByMe: wasOn,
+      });
+    }
+  };
+
   // ---- Layout (inline styles) ----
   const containerStyle: React.CSSProperties = {
-    maxWidth: 560, // keep column narrow on iPad/desktop
+    maxWidth: 560, // iPad-friendly column
     width: '100%',
     margin: '0 auto',
   };
@@ -366,7 +418,7 @@ export default function FriendsFeed() {
     display: 'flex',
     alignItems: 'center',
     gap: 10,
-    padding: '4px 12px', // compact
+    padding: '4px 12px',
   };
   const boldNameStyle: React.CSSProperties = {
     fontWeight: 700,
@@ -375,7 +427,6 @@ export default function FriendsFeed() {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   };
-  // space-between: "Added on ..." left, buttons right
   const actionsRowStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
@@ -408,7 +459,7 @@ export default function FriendsFeed() {
         <div style={{ padding: '10px 12px', borderBottom: '1px solid #e5e7eb' }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Friends</h1>
           <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>
-            Your recipes + friends’ recipes (non-private)
+            Non-private recipes from you + your friends, newest first
           </p>
         </div>
 
@@ -615,13 +666,4 @@ function Avatar({
       {initials}
     </div>
   );
-}
-
-// ===== TOGGLES with optimistic update + EMIT events for cross-sync =====
-async function toggleHeart(r: Recipe, userId?: string | null) {
-  // no-op placeholder for TS; real handler is bound inline below
-}
-
-async function toggleBookmark(r: Recipe, userId?: string | null) {
-  // no-op placeholder for TS; real handler is bound inline below
 }
