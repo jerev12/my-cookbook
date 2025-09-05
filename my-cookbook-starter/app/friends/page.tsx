@@ -360,7 +360,7 @@ export default function FriendsFeed() {
   };
   const articleStyle: React.CSSProperties = {
     paddingTop: 4,
-    borderBottom: '1px solid '#e5e7eb',
+    borderBottom: '1px solid #e5e7eb',
   };
   const headerRowStyle: React.CSSProperties = {
     display: 'flex',
