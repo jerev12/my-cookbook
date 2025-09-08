@@ -287,19 +287,23 @@ export default function FriendsList() {
       cursor: 'default',
     };
 
-const listWrap: React.CSSProperties = { 
+const listWrap: React.CSSProperties = {
   maxHeight: '65vh',
-  overflow: 'auto',
+  overflowY: 'auto',
+  overflowX: 'hidden',   // stop sideways scroll
   margin: 0,
   padding: 0,
-  listStyle: 'none'
+  listStyle: 'none',
+  maxWidth: '100%',
+  boxSizing: 'border-box',
 };
 
 const rowStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  justifyContent: 'space-between',  // ✅ keeps text left + button right
+  justifyContent: 'space-between',  // keeps name left, button right
   width: '100%',
+  maxWidth: '100%',                  // never wider than modal
   borderBottom: '1px solid #eee',
   padding: '12px 8px',
   background: '#fff',
