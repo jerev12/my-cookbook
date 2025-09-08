@@ -101,11 +101,11 @@ export default function FriendsFeed() {
           return;
         }
 
-        const a = (outRows ?? []).map((r: any) => r.addressee_id as string);
-        const b = (inRows ?? []).map((r: any) => r.requester_id as string);
+        const a = (outRows ?? []).map((r: any) => r.addressee_id);
+        const b = (inRows ?? []).map((r: any) => r.requester_id);
         const uniq = Array.from(new Set([...a, ...b])).filter((id) => id && id !== userId);
 
-        if (mounted) setFriendIds(uniq);
+        if (mounted) setFriendIds(uniq as string[]);
       } catch (e: any) {
         if (!mounted) return;
         setMsg(e?.message ?? 'Failed to load friends.');
@@ -205,11 +205,10 @@ export default function FriendsFeed() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        const { data: recipeRows, error: recipeErr } = await supabase
+        // Query: only (you + friends); visibility guarded server-side
+        let qb = supabase
           .from('recipes')
-          .select(
-            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
-          )
+          .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility')
           .in(
             'user_id',
             visibleUserIds.length
@@ -220,16 +219,19 @@ export default function FriendsFeed() {
           .order('id', { ascending: false })
           .range(from, to);
 
+        // IMPORTANT: push visibility to server
+        if (userId) {
+          // your own OR friends’ visible (public/friends)
+          qb = qb.or(`user_id.eq.${userId},visibility.in.(public,friends)`);
+        } else {
+          qb = qb.eq('visibility', 'public');
+        }
+
+        const { data: recipeRows, error: recipeErr } = await qb;
         if (recipeErr) throw recipeErr;
 
-        // --- CLIENT-SIDE VISIBILITY FILTER ---
-        // keep your own recipes; for friends exclude 'private'
-        const filtered: Recipe[] =
-          (recipeRows as Recipe[] | null)?.filter((r) => {
-            if (r.user_id === userId) return true; // always show your own
-            const vis = (r.visibility ?? '').toLowerCase();
-            return vis === 'public' || vis === 'friends';
-          }) ?? [];
+        // keep everything returned (RLS + server-side filter already applied)
+        const filtered: Recipe[] = (recipeRows as Recipe[] | null) ?? [];
 
         const newOnes = filtered.filter((r) => !seenIdsRef.current.has(r.id));
         newOnes.forEach((r) => seenIdsRef.current.add(r.id));
@@ -250,7 +252,7 @@ export default function FriendsFeed() {
 
         const gotAll = (recipeRows?.length ?? 0) < PAGE_SIZE;
 
-        // Strong de-dupe on append + enforce newest-first (created_at desc, then id desc)
+        // Strong de-dupe + newest-first (created_at desc, then id desc)
         setRows((prev) => {
           const map = new Map<string, Recipe>();
           for (const x of prev) map.set(x.id, x);
@@ -259,8 +261,8 @@ export default function FriendsFeed() {
           arr.sort((a, b) => {
             const ta = a.created_at ? Date.parse(a.created_at) : 0;
             const tb = b.created_at ? Date.parse(b.created_at) : 0;
-            if (tb !== ta) return tb - ta; // created_at desc
-            return (b.id || '').localeCompare(a.id || ''); // id desc tie-break
+            if (tb !== ta) return tb - ta;                  // created_at desc
+            return (b.id || '').localeCompare(a.id || '');  // id desc tie-break
           });
           return arr;
         });
