@@ -205,10 +205,14 @@ export default function FriendsFeed() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // Query: only (you + friends); visibility guarded server-side
-        let qb = supabase
+        // IMPORTANT:
+        // - Include ONLY users in (you + friends)
+        // - Do NOT add server-side visibility OR filter (RLS + client filter will handle it)
+        const { data: recipeRows, error: recipeErr } = await supabase
           .from('recipes')
-          .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility')
+          .select(
+            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
+          )
           .in(
             'user_id',
             visibleUserIds.length
@@ -216,22 +220,19 @@ export default function FriendsFeed() {
               : ['00000000-0000-0000-0000-000000000000']
           )
           .order('created_at', { ascending: false })
-          .order('id', { ascending: false })
           .range(from, to);
 
-        // IMPORTANT: push visibility to server
-        if (userId) {
-          // your own OR friends’ visible (public/friends)
-          qb = qb.or(`user_id.eq.${userId},visibility.in.(public,friends)`);
-        } else {
-          qb = qb.eq('visibility', 'public');
-        }
-
-        const { data: recipeRows, error: recipeErr } = await qb;
         if (recipeErr) throw recipeErr;
 
-        // keep everything returned (RLS + server-side filter already applied)
-        const filtered: Recipe[] = (recipeRows as Recipe[] | null) ?? [];
+        // Client-side visibility rule:
+        // - Always show your own recipes
+        // - For friends, show only 'public' or 'friends'
+        const filtered: Recipe[] =
+          (recipeRows as Recipe[] | null)?.filter((r) => {
+            if (r.user_id === userId) return true;
+            const vis = (r.visibility ?? '').toLowerCase();
+            return vis === 'public' || vis === 'friends';
+          }) ?? [];
 
         const newOnes = filtered.filter((r) => !seenIdsRef.current.has(r.id));
         newOnes.forEach((r) => seenIdsRef.current.add(r.id));
@@ -252,7 +253,7 @@ export default function FriendsFeed() {
 
         const gotAll = (recipeRows?.length ?? 0) < PAGE_SIZE;
 
-        // Strong de-dupe + newest-first (created_at desc, then id desc)
+        // Strong de-dupe + newest-first by created_at (tie-break with id)
         setRows((prev) => {
           const map = new Map<string, Recipe>();
           for (const x of prev) map.set(x.id, x);
@@ -261,8 +262,8 @@ export default function FriendsFeed() {
           arr.sort((a, b) => {
             const ta = a.created_at ? Date.parse(a.created_at) : 0;
             const tb = b.created_at ? Date.parse(b.created_at) : 0;
-            if (tb !== ta) return tb - ta;                  // created_at desc
-            return (b.id || '').localeCompare(a.id || '');  // id desc tie-break
+            if (tb !== ta) return tb - ta;                 // created_at desc
+            return (b.id || '').localeCompare(a.id || ''); // id desc tie-break
           });
           return arr;
         });
@@ -481,11 +482,6 @@ export default function FriendsFeed() {
           <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>
             Your recipes + friends’ recipes (non-private)
           </p>
-        </div>
-
-        {/* Debug (you can remove later) */}
-        <div style={{ padding: 8, color: '#6b7280', fontSize: 12 }}>
-          debug: rows={rows.length} uniqueIds={new Set(rows.map(r => r.id)).size}
         </div>
 
         {msg && (
