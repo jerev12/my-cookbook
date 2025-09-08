@@ -209,32 +209,26 @@ export default function FriendsFeed() {
         // - Include ONLY users in (you + friends)
         // - Include your own recipes regardless of visibility
         // - Include friends' recipes only if visibility != 'private'
-        const qb = supabase
-          .from('recipes')
-          .select(
-            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
-          )
-          .in(
-            'user_id',
-            visibleUserIds.length
-              ? visibleUserIds
-              : ['00000000-0000-0000-0000-000000000000']
-          )
-          .order('created_at', { ascending: false })
-          .order('id', { ascending: false }) // secondary tie-break for stable paging
-          .range(from, to);
-
-        // Add the OR filter (own rows OR non-private)
-        if (userId) {
-          qb.or(`user_id.eq.${userId},visibility.neq.private`);
-        } else {
-          qb.neq('visibility', 'private');
-        }
-
-        const { data: recipeRows, error: recipeErr } = await qb;
+const { data: recipeRows, error: recipeErr } = await supabase
+  .from('recipes')
+  .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility')
+  .in('user_id', visibleUserIds.length ? visibleUserIds : ['00000000-0000-0000-0000-000000000000'])
+  .order('created_at', { ascending: false })
+  .order('id', { ascending: false })
+  .range(from, to);
 
         if (recipeErr) throw recipeErr;
 
+        // --- CLIENT-SIDE VISIBILITY FILTER ---
+// keep your own recipes; for friends exclude 'private'
+const filtered: Recipe[] =
+  (recipeRows as Recipe[] | null)?.filter((r) => {
+    if (r.user_id === userId) return true; // always show your own
+    const vis = (r.visibility ?? '').toLowerCase();
+    // show friends' recipes only if public or friends-visible
+    return vis === 'public' || vis === 'friends';
+  }) ?? [];
+        
         // No extra client-side visibility filtering needed now
         const filtered: Recipe[] = (recipeRows as Recipe[] | null) ?? [];
 
