@@ -101,11 +101,11 @@ export default function FriendsFeed() {
           return;
         }
 
-        const a = (outRows ?? []).map((r: any) => r.addressee_id);
-        const b = (inRows ?? []).map((r: any) => r.requester_id);
+        const a = (outRows ?? []).map((r: any) => r.addressee_id as string);
+        const b = (inRows ?? []).map((r: any) => r.requester_id as string);
         const uniq = Array.from(new Set([...a, ...b])).filter((id) => id && id !== userId);
 
-        if (mounted) setFriendIds(uniq as string[]);
+        if (mounted) setFriendIds(uniq);
       } catch (e: any) {
         if (!mounted) return;
         setMsg(e?.message ?? 'Failed to load friends.');
@@ -205,32 +205,31 @@ export default function FriendsFeed() {
         const from = nextPage * PAGE_SIZE;
         const to = from + PAGE_SIZE - 1;
 
-        // IMPORTANT:
-        // - Include ONLY users in (you + friends)
-        // - Include your own recipes regardless of visibility
-        // - Include friends' recipes only if visibility != 'private'
-const { data: recipeRows, error: recipeErr } = await supabase
-  .from('recipes')
-  .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility')
-  .in('user_id', visibleUserIds.length ? visibleUserIds : ['00000000-0000-0000-0000-000000000000'])
-  .order('created_at', { ascending: false })
-  .order('id', { ascending: false })
-  .range(from, to);
+        const { data: recipeRows, error: recipeErr } = await supabase
+          .from('recipes')
+          .select(
+            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility'
+          )
+          .in(
+            'user_id',
+            visibleUserIds.length
+              ? visibleUserIds
+              : ['00000000-0000-0000-0000-000000000000']
+          )
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, to);
 
         if (recipeErr) throw recipeErr;
 
         // --- CLIENT-SIDE VISIBILITY FILTER ---
-// keep your own recipes; for friends exclude 'private'
-const filtered: Recipe[] =
-  (recipeRows as Recipe[] | null)?.filter((r) => {
-    if (r.user_id === userId) return true; // always show your own
-    const vis = (r.visibility ?? '').toLowerCase();
-    // show friends' recipes only if public or friends-visible
-    return vis === 'public' || vis === 'friends';
-  }) ?? [];
-        
-        // No extra client-side visibility filtering needed now
-        const filtered: Recipe[] = (recipeRows as Recipe[] | null) ?? [];
+        // keep your own recipes; for friends exclude 'private'
+        const filtered: Recipe[] =
+          (recipeRows as Recipe[] | null)?.filter((r) => {
+            if (r.user_id === userId) return true; // always show your own
+            const vis = (r.visibility ?? '').toLowerCase();
+            return vis === 'public' || vis === 'friends';
+          }) ?? [];
 
         const newOnes = filtered.filter((r) => !seenIdsRef.current.has(r.id));
         newOnes.forEach((r) => seenIdsRef.current.add(r.id));
@@ -260,8 +259,8 @@ const filtered: Recipe[] =
           arr.sort((a, b) => {
             const ta = a.created_at ? Date.parse(a.created_at) : 0;
             const tb = b.created_at ? Date.parse(b.created_at) : 0;
-            if (tb !== ta) return tb - ta;                  // created_at desc
-            return (b.id || '').localeCompare(a.id || '');  // id desc tie-break
+            if (tb !== ta) return tb - ta; // created_at desc
+            return (b.id || '').localeCompare(a.id || ''); // id desc tie-break
           });
           return arr;
         });
@@ -286,8 +285,6 @@ const filtered: Recipe[] =
     setHasMore(true);
     seenIdsRef.current.clear();
     fetchPage(0);
-
-    // (Removed) prefetch timer to avoid double loads
   }, [userId, friendIds.join('|'), fetchPage]);
 
   // Infinite scroll — IntersectionObserver only
