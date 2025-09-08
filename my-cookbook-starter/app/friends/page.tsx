@@ -414,10 +414,15 @@ export default function FriendsFeed() {
         <div style={{ padding: '10px 12px', borderBottom: '1px solid #e5e7eb' }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Friends</h1>
           <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>
-            Your recipes + friends’ recipes (non-private)
+            Your recipes + friends’ recipes
           </p>
         </div>
 
+              {/* Debug info */}
+      <div style={{padding: 8, color: '#6b7280', fontSize: 12}}>
+        debug: rows={rows.length} uniqueIds={new Set(rows.map(r=>r.id)).size}
+      </div>
+        
         {msg && (
           <div
             style={{
