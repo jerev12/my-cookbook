@@ -298,14 +298,30 @@ const listWrap: React.CSSProperties = {
 const rowStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 12,
-  width: '100%',              // 🔑 spans full modal width
+  justifyContent: 'space-between',  // ✅ keeps text left + button right
+  width: '100%',
   borderBottom: '1px solid #eee',
   padding: '12px 8px',
   background: '#fff',
+  boxSizing: 'border-box',
 };
-    const nameStyle: React.CSSProperties = { fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' };
-    const linkStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: 'inherit', flex: 1, minWidth: 0 };
+
+const linkStyle: React.CSSProperties = { 
+  display: 'flex', 
+  alignItems: 'center', 
+  gap: 12, 
+  textDecoration: 'none', 
+  color: 'inherit',
+  flex: 1,
+  minWidth: 0,
+};
+
+const nameStyle: React.CSSProperties = { 
+  fontWeight: 600, 
+  overflow: 'hidden', 
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap', 
+};
 
     return (
       <div>
