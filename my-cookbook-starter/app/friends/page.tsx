@@ -256,6 +256,12 @@ export default function FriendsFeed() {
 
         const gotAll = (recipeRows?.length ?? 0) < PAGE_SIZE;
 
+        console.log('[DEBUG] page', nextPage, {
+  fetchedCount: recipeRows?.length,
+  filteredCount: filtered.length,
+  newOnesIds: newOnes.map(r => r.id),
+  firstThree: filtered.slice(0,3).map(r => ({id:r.id, created_at:r.created_at}))
+});
         setRows((prev) => [...prev, ...withMeta]);
         setHasMore(!gotAll);
         setPage(nextPage);
