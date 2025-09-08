@@ -105,7 +105,7 @@ export default function FriendsFeed() {
         const b = (inRows ?? []).map((r: any) => r.requester_id);
         const uniq = Array.from(new Set([...a, ...b])).filter((id) => id && id !== userId);
 
-        if (mounted) setFriendIds(uniq);
+        if (mounted) setFriendIds(uniq as string[]);
       } catch (e: any) {
         if (!mounted) return;
         setMsg(e?.message ?? 'Failed to load friends.');
@@ -221,6 +221,7 @@ export default function FriendsFeed() {
               : ['00000000-0000-0000-0000-000000000000']
           )
           .order('created_at', { ascending: false })
+          .order('id', { ascending: false }) // secondary tie-break for stable paging
           .range(from, to);
 
         // Add the OR filter (own rows OR non-private)
@@ -256,13 +257,21 @@ export default function FriendsFeed() {
 
         const gotAll = (recipeRows?.length ?? 0) < PAGE_SIZE;
 
-        console.log('[DEBUG] page', nextPage, {
-  fetchedCount: recipeRows?.length,
-  filteredCount: filtered.length,
-  newOnesIds: newOnes.map(r => r.id),
-  firstThree: filtered.slice(0,3).map(r => ({id:r.id, created_at:r.created_at}))
-});
-        setRows((prev) => [...prev, ...withMeta]);
+        // Strong de-dupe on append + enforce newest-first (created_at desc, then id desc)
+        setRows((prev) => {
+          const map = new Map<string, Recipe>();
+          for (const x of prev) map.set(x.id, x);
+          for (const x of withMeta) map.set(x.id, x);
+          const arr = Array.from(map.values());
+          arr.sort((a, b) => {
+            const ta = a.created_at ? Date.parse(a.created_at) : 0;
+            const tb = b.created_at ? Date.parse(b.created_at) : 0;
+            if (tb !== ta) return tb - ta;                  // created_at desc
+            return (b.id || '').localeCompare(a.id || '');  // id desc tie-break
+          });
+          return arr;
+        });
+
         setHasMore(!gotAll);
         setPage(nextPage);
       } catch (e: any) {
@@ -284,14 +293,10 @@ export default function FriendsFeed() {
     seenIdsRef.current.clear();
     fetchPage(0);
 
-    // Prefetch next page once (helps surface friends sooner)
-    const t = setTimeout(() => {
-      if (hasMoreRef.current) fetchPage(1);
-    }, 100);
-    return () => clearTimeout(t);
+    // (Removed) prefetch timer to avoid double loads
   }, [userId, friendIds.join('|'), fetchPage]);
 
-  // Infinite scroll — IntersectionObserver
+  // Infinite scroll — IntersectionObserver only
   useEffect(() => {
     if (!hasMore || loading) return;
     const el = sentinelRef.current;
@@ -307,21 +312,7 @@ export default function FriendsFeed() {
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [loading, page, fetchPage, hasMore]);
-
-  // Infinite scroll — window scroll fallback (for iPad/mobile flakiness)
-  useEffect(() => {
-    function onScroll() {
-      const nearBottom =
-        window.innerHeight + window.scrollY >=
-        document.documentElement.scrollHeight - 800;
-      if (nearBottom && !loading && hasMoreRef.current) {
-        fetchPage(page + 1);
-      }
-    }
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [loading, page, fetchPage]);
+  }, [hasMore, loading, page, fetchPage]);
 
   // ===== SUBSCRIBE to cross-component mutations (from RecipeModal, etc.) =====
   useEffect(() => {
@@ -357,6 +348,87 @@ export default function FriendsFeed() {
     setOpen(false);
     setSelected(null);
   }
+
+  // ===== TOGGLES with optimistic update + EMIT events for cross-sync =====
+  const onToggleHeart = async (r: Recipe) => {
+    if (!userId) return;
+    const wasOn = !!r._heartedByMe;
+
+    // optimistic UI
+    setRows((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? { ...x, _heartedByMe: !wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? -1 : 1) }
+          : x
+      )
+    );
+    emitRecipeMutation({ id: r.id, heartDelta: wasOn ? -1 : +1, heartedByMe: !wasOn });
+
+    try {
+      if (wasOn) {
+        await supabase.from('hearts').delete().eq('recipe_id', r.id).eq('user_id', userId);
+      } else {
+        await supabase.from('hearts').insert({ recipe_id: r.id, user_id: userId });
+      }
+    } catch {
+      // rollback
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? { ...x, _heartedByMe: wasOn, _heartCount: (x._heartCount ?? 0) + (wasOn ? 1 : -1) }
+            : x
+        )
+      );
+      emitRecipeMutation({ id: r.id, heartDelta: wasOn ? +1 : -1, heartedByMe: wasOn });
+    }
+  };
+
+  const onToggleBookmark = async (r: Recipe) => {
+    if (!userId) return;
+    const wasOn = !!r._bookmarkedByMe;
+
+    // optimistic UI (count visible only on own recipes)
+    setRows((prev) =>
+      prev.map((x) =>
+        x.id === r.id
+          ? {
+              ...x,
+              _bookmarkedByMe: !wasOn,
+              _bookmarkCount:
+                x.user_id === userId
+                  ? (x._bookmarkCount ?? 0) + (wasOn ? -1 : 1)
+                  : x._bookmarkCount,
+            }
+          : x
+      )
+    );
+    emitRecipeMutation({ id: r.id, bookmarkDelta: wasOn ? -1 : +1, bookmarkedByMe: !wasOn });
+
+    try {
+      if (wasOn) {
+        await supabase.from('bookmarks').delete().eq('recipe_id', r.id).eq('user_id', userId);
+      } else {
+        await supabase.from('bookmarks').insert({ recipe_id: r.id, user_id: userId });
+      }
+    } catch {
+      // rollback
+      setRows((prev) =>
+        prev.map((x) =>
+          x.id === r.id
+            ? {
+                ...x,
+                _bookmarkedByMe: wasOn,
+                _bookmarkCount:
+                  x.user_id === userId
+                    ? (x._bookmarkCount ?? 0) + (wasOn ? 1 : -1)
+                    : x._bookmarkCount,
+              }
+            : x
+        )
+      );
+      emitRecipeMutation({ id: r.id, bookmarkDelta: wasOn ? +1 : -1, bookmarkedByMe: wasOn });
+    }
+  };
 
   // ---- Layout (inline styles) ----
   const containerStyle: React.CSSProperties = {
@@ -414,15 +486,15 @@ export default function FriendsFeed() {
         <div style={{ padding: '10px 12px', borderBottom: '1px solid #e5e7eb' }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Friends</h1>
           <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>
-            Your recipes + friends’ recipes
+            Your recipes + friends’ recipes (non-private)
           </p>
         </div>
 
-              {/* Debug info */}
-      <div style={{padding: 8, color: '#6b7280', fontSize: 12}}>
-        debug: rows={rows.length} uniqueIds={new Set(rows.map(r=>r.id)).size}
-      </div>
-        
+        {/* Debug (you can remove later) */}
+        <div style={{ padding: 8, color: '#6b7280', fontSize: 12 }}>
+          debug: rows={rows.length} uniqueIds={new Set(rows.map(r => r.id)).size}
+        </div>
+
         {msg && (
           <div
             style={{
@@ -489,7 +561,7 @@ export default function FriendsFeed() {
                 <div style={actionsRightStyle}>
                   <button
                     type="button"
-                    onClick={() => toggleHeart(r)}
+                    onClick={() => onToggleHeart(r)}
                     aria-label={r._heartedByMe ? 'Remove heart' : 'Add heart'}
                     style={iconBtnStyle}
                     title={r._heartedByMe ? 'Unheart' : 'Heart'}
@@ -500,7 +572,7 @@ export default function FriendsFeed() {
 
                   <button
                     type="button"
-                    onClick={() => toggleBookmark(r)}
+                    onClick={() => onToggleBookmark(r)}
                     aria-label={r._bookmarkedByMe ? 'Remove bookmark' : 'Add bookmark'}
                     style={{
                       ...iconBtnStyle,
@@ -626,13 +698,4 @@ function Avatar({
       {initials}
     </div>
   );
-}
-
-// ===== TOGGLES with optimistic update + EMIT events for cross-sync =====
-async function toggleHeart(r: Recipe, userId?: string | null) {
-  // no-op placeholder for TS; real handler is bound inline below
-}
-
-async function toggleBookmark(r: Recipe, userId?: string | null) {
-  // no-op placeholder for TS; real handler is bound inline below
 }
