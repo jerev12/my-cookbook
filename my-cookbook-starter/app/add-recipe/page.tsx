@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Cropper from 'react-easy-crop';
+import AvatarCropModal from '@/app/components/AvatarCropModal';
 import { supabase } from '@/lib/supabaseClient';
 
 type Visibility = 'private' | 'friends' | 'public';
@@ -43,26 +43,6 @@ const RECIPE_TYPE_OPTIONS = [
 ];
 
 // ---------- Helpers ----------
-async function getCroppedBlob(
-  imageSrc: string,
-  crop: { x: number; y: number; width: number; height: number }
-): Promise<Blob> {
-  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-    const i = new Image();
-    i.crossOrigin = 'anonymous';
-    i.onload = () => resolve(i);
-    i.onerror = reject;
-    i.src = imageSrc;
-  });
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(crop.width);
-  canvas.height = Math.round(crop.height);
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(img, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-  return await new Promise<Blob>((resolve) =>
-    canvas.toBlob((b) => resolve(b as Blob), 'image/jpeg', 0.9)
-  );
-}
 function storagePathFromPublicUrl(publicUrl: string): string | null {
   try {
     const u = new URL(publicUrl);
@@ -156,9 +136,6 @@ function AddRecipeForm() {
   const oldPhotoPathRef = useRef<string | null>(null);
   const [localPhotoSrc, setLocalPhotoSrc] = useState<string | null>(null);
   const [showCropper, setShowCropper] = useState(false);
-  const [crop, setCrop] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [croppedPixels, setCroppedPixels] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // ------ AUTH LOAD ------
@@ -279,52 +256,6 @@ function AddRecipeForm() {
     const url = URL.createObjectURL(f);
     setLocalPhotoSrc(url);
     setShowCropper(true);
-    setZoom(1); setCrop({ x: 0, y: 0 });
-  }
-  function onCropComplete(_: any, areaPixels: any) { setCroppedPixels(areaPixels); }
-
-  async function confirmCrop() {
-    if (!localPhotoSrc || !croppedPixels) return;
-    try {
-      setBusy(true); setMsg(null);
-      const blob = await getCroppedBlob(localPhotoSrc, croppedPixels);
-      const { data: userRes } = await supabase.auth.getUser();
-      const userId = userRes?.user?.id; if (!userId) throw new Error('No signed-in user — please log in again.');
-
-      const base = (sp.get('id') || crypto.randomUUID()).toString();
-      const filename = `${base}-${Date.now()}.jpg`;
-      const newPath = `${userId}/${filename}`;
-
-      const upRes = await supabase.storage.from('recipe-photos').upload(newPath, blob, { contentType: 'image/jpeg' });
-      if (upRes.error) throw upRes.error;
-
-      const { data: pub } = supabase.storage.from('recipe-photos').getPublicUrl(newPath);
-      const newPublicUrl = pub.publicUrl;
-
-      if (isEditing && editId) {
-        const { error: upErr } = await supabase
-          .from('recipes')
-          .update({ photo_url: newPublicUrl })
-          .eq('id', editId)
-          .eq('user_id', userId);
-        if (upErr) throw upErr;
-      }
-
-      setPhotoUrl(newPublicUrl);
-      const prevPath = oldPhotoPathRef.current;
-      if (prevPath && prevPath !== newPath) {
-        await supabase.storage.from('recipe-photos').remove([prevPath]);
-      }
-      oldPhotoPathRef.current = newPath;
-
-      setShowCropper(false);
-      URL.revokeObjectURL(localPhotoSrc);
-      setLocalPhotoSrc(null);
-    } catch (e: any) {
-      setMsg(e?.message || 'Image upload failed.');
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function removePhoto() {
@@ -358,6 +289,14 @@ function AddRecipeForm() {
       setBusy(false);
     }
   }
+
+  // Freeze background scroll while cropper is open
+  useEffect(() => {
+    if (!showCropper) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [showCropper]);
 
   // ------ DELETE RECIPE (Edit mode) ------
   async function deleteRecipe() {
@@ -931,52 +870,67 @@ function AddRecipeForm() {
         )}
       </section>
 
-      {/* Cropper modal */}
-      {showCropper && (
-        <div role="dialog" aria-modal="true" className="ar-modal">
-          <div className="ar-modal-card">
-            <div className="ar-modal-head">Adjust Photo</div>
-            <div className="ar-cropper-wrap">
-              {localPhotoSrc && (
-                <Cropper
-                  image={localPhotoSrc}
-                  crop={crop}
-                  zoom={zoom}
-                  aspect={1}
-                  onCropChange={setCrop}
-                  onZoomChange={setZoom}
-                  onCropComplete={onCropComplete}
-                  restrictPosition={false}
-                  cropShape="rect"
-                  showGrid={false}
-                />
-              )}
-            </div>
-            <div className="ar-modal-foot">
-              <div className="ar-modal-actions">
-                <input
-                  type="range"
-                  min={1}
-                  max={3}
-                  step={0.01}
-                  value={zoom}
-                  onChange={(e) => setZoom(parseFloat(e.target.value))}
-                  className="ar-zoom"
-                />
-                <button
-                  type="button"
-                  onClick={() => { if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc); setLocalPhotoSrc(null); setShowCropper(false); }}
-                  className="ar-btn-light"
-                >
-                  Cancel
-                </button>
-                <button type="button" onClick={confirmCrop} className="ar-btn-primary">
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Shared cropper modal (reuses your AvatarCropModal) */}
+      {showCropper && localPhotoSrc && (
+        <AvatarCropModal
+          open
+          imageSrc={localPhotoSrc}
+          aspect={1} // keep square for recipe images
+          onCancel={() => {
+            try { if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc); } catch {}
+            setLocalPhotoSrc(null);
+            setShowCropper(false);
+          }}
+          onSave={async (blob: Blob) => {
+            try {
+              setBusy(true); setMsg(null);
+              const { data: userRes } = await supabase.auth.getUser();
+              const userId = userRes?.user?.id;
+              if (!userId) throw new Error('No signed-in user — please log in again.');
+
+              const base = (sp.get('id') || crypto.randomUUID()).toString();
+              const filename = `${base}-${Date.now()}.jpg`;
+              const newPath = `${userId}/${filename}`;
+
+              const upRes = await supabase
+                .storage
+                .from('recipe-photos')
+                .upload(newPath, blob, { contentType: 'image/jpeg' });
+              if (upRes.error) throw upRes.error;
+
+              const { data: pub } = supabase
+                .storage
+                .from('recipe-photos')
+                .getPublicUrl(newPath);
+              const newPublicUrl = pub.publicUrl;
+
+              // if editing, persist to DB right away
+              if (isEditing && editId) {
+                const { error: upErr } = await supabase
+                  .from('recipes')
+                  .update({ photo_url: newPublicUrl })
+                  .eq('id', editId);
+                if (upErr) throw upErr;
+              }
+
+              // auto-delete previous file if it existed and changed
+              const prevPath = oldPhotoPathRef.current;
+              if (prevPath && prevPath !== newPath) {
+                await supabase.storage.from('recipe-photos').remove([prevPath]);
+              }
+              oldPhotoPathRef.current = newPath;
+
+              setPhotoUrl(newPublicUrl);
+            } catch (e: any) {
+              setMsg(e?.message || 'Image upload failed.');
+            } finally {
+              try { if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc); } catch {}
+              setLocalPhotoSrc(null);
+              setShowCropper(false);
+              setBusy(false);
+            }
+          }}
+        />
       )}
 
       {/* Responsive styles */}
@@ -1050,46 +1004,6 @@ function AddRecipeForm() {
         .ar-caret { transition: transform .15s ease; }
         .ar-caret.rot { transform: rotate(-90deg); }
 
-        /* Modal */
-        .ar-modal {
-          position: fixed; inset: 0;
-          background: rgba(0,0,0,0.5);
-          display: grid; place-items: center;
-          z-index: 50; padding: 12px;
-        }
-        .ar-modal-card {
-          width: min(92vw, 520px);
-          background: #fff;
-          border-radius: 12px;
-          overflow: hidden;
-          border: 1px solid #e5e7eb;
-          display: grid;
-          grid-template-rows: auto 1fr auto;
-          max-height: 90vh;
-        }
-        .ar-modal-head {
-          padding: 12px;
-          border-bottom: 1px solid #f1f5f9;
-          font-weight: 600;
-        }
-        .ar-cropper-wrap {
-          position: relative;
-          height: 60vh;           /* flexible on most screens */
-          min-height: 280px;      /* usable on tiny devices */
-          max-height: 520px;      /* keep it reasonable on tablets */
-        }
-        .ar-modal-foot {
-          padding: 12px;
-          border-top: 1px solid #f1f5f9;
-        }
-        .ar-modal-actions {
-          display: grid;
-          grid-template-columns: 1fr 1fr 1fr;
-          gap: 10px;
-          align-items: center;
-        }
-        .ar-zoom { grid-column: 1 / -1; }
-
         /* --------- Responsive tweaks --------- */
 
         /* Small phones: stack photo row, full-width buttons, bigger touch targets */
@@ -1106,11 +1020,6 @@ function AddRecipeForm() {
           .ar-actions {
             grid-template-columns: 1fr; /* stack Save/Cancel */
           }
-          .ar-modal-card { width: 96vw; }
-          .ar-cropper-wrap {
-            height: 52vh;
-            min-height: 240px;
-          }
         }
 
         /* Ultra-narrow (legacy 320px) */
@@ -1121,9 +1030,6 @@ function AddRecipeForm() {
             font-size: 13.5px;
           }
         }
-
-        /* iPad portrait still uses your wide layout; nothing special needed.
-           If you want tighter paddings on large tablets/desktops, add a min-width rule. */
       `}</style>
     </main>
   );
