@@ -87,21 +87,24 @@ export default function AddRecipePage() {
 // ---------- Reusable field style ----------
 const fieldStyle: React.CSSProperties = {
   width: '100%',
-  padding: 8,
+  padding: 10, // keep ≥10px for tap targets
   borderRadius: 6,
   border: '1px solid #e5e7eb',
   background: '#fff',
   boxSizing: 'border-box',
+  fontSize: 16, // ≥16px prevents iOS zoom-on-focus
+  lineHeight: 1.35,
 };
 
 // ---------- Chip styles ----------
 const chipBase: React.CSSProperties = {
-  padding: '6px 10px',
+  padding: '8px 12px',
   borderRadius: 999,
   border: '1px solid #e5e7eb',
   background: '#fff',
   cursor: 'pointer',
-  fontSize: 13,
+  fontSize: 14,
+  lineHeight: 1.2,
 };
 const chipActive: React.CSSProperties = {
   ...chipBase,
@@ -441,7 +444,6 @@ function AddRecipeForm() {
     if (!useComponents) {
       if (!instructions.trim()) return setMsg('Add instructions (one step per line)');
     } else {
-      // ensure at least one component has content
       if (components.length === 0) return setMsg('Add at least one component or switch back to simple mode.');
       const anySteps = components.some(c => c.instructions.trim().length > 0);
       if (!anySteps) return setMsg('Each recipe needs instructions. Add steps to at least one component.');
@@ -454,9 +456,8 @@ function AddRecipeForm() {
     setBusy(true);
 
     try {
-      // ---- EDIT MODE ----
+      // EDIT
       if (isEditing && editId) {
-        // Update core recipe data
         const { error: upErr } = await supabase
           .from('recipes')
           .update({
@@ -466,7 +467,6 @@ function AddRecipeForm() {
             visibility,
             photo_url: photoUrl || null,
             recipe_types: recipeTypes,
-            // keep instructions text (used for ordering hints)
             instructions: useComponents
               ? components.map(c => `${(c.title || 'Main').trim() || 'Main'}:\n${c.instructions.trim()}\n`).join('\n')
               : instructions,
@@ -475,7 +475,6 @@ function AddRecipeForm() {
           .eq('user_id', userId);
         if (upErr) throw upErr;
 
-        // Replace child rows
         const [{ error: d1 }, { error: d2 }] = await Promise.all([
           supabase.from('recipe_ingredients').delete().eq('recipe_id', editId),
           supabase.from('recipe_steps').delete().eq('recipe_id', editId),
@@ -483,7 +482,6 @@ function AddRecipeForm() {
         if (d1 || d2) throw (d1 || d2);
 
         if (!useComponents) {
-          // SIMPLE: ingredients + steps from simple fields
           const ingArray: IngredientRow[] = (ingredients || [])
             .map(i => i.trim()).filter(Boolean).map(item_name => ({ item_name }));
           const steps = (instructions || '')
@@ -503,7 +501,6 @@ function AddRecipeForm() {
             if (error) throw error;
           }
         } else {
-          // COMPONENT MODE
           const flatIngs: DBIngredient[] = [];
           const flatSteps: DBStep[] = [];
           components.forEach((c) => {
@@ -538,9 +535,8 @@ function AddRecipeForm() {
         return;
       }
 
-      // ---- CREATE MODE ----
+      // CREATE
       if (!useComponents) {
-        // SIMPLE: use your existing RPC
         const ingArray: IngredientRow[] = (ingredients || [])
           .map(i => i.trim()).filter(Boolean).map(item_name => ({ item_name }));
         const steps = (instructions || '')
@@ -560,7 +556,6 @@ function AddRecipeForm() {
         });
         if (error) throw error;
       } else {
-        // COMPONENT MODE: create recipe row, then insert labeled children
         const instrForHints = components
           .map(c => `${(c.title || 'Main').trim() || 'Main'}:\n${c.instructions.trim()}\n`).join('\n');
 
@@ -573,7 +568,7 @@ function AddRecipeForm() {
             visibility,
             photo_url: photoUrl || null,
             recipe_types: recipeTypes,
-            instructions: instrForHints, // keep headings for modal ordering hints
+            instructions: instrForHints,
           })
           .select('id')
           .single();
@@ -639,8 +634,8 @@ function AddRecipeForm() {
 
   // ------ LAYOUT ------
   return (
-    <main style={{ maxWidth: 760, margin: '28px auto', padding: 16 }}>
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+    <main className="ar-container" style={{ maxWidth: 760, margin: '28px auto', padding: 16 }}>
+      <header className="ar-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <h1 style={{ margin: 0, fontSize: 22 }}>{isEditing ? 'Edit Recipe' : 'Add a Recipe'}</h1>
       </header>
 
@@ -650,29 +645,25 @@ function AddRecipeForm() {
         </div>
       )}
 
-      <section style={{ background: '#fff', border: '1px solid #eee', borderRadius: 12, padding: 14, display: 'grid', gap: 12 }}>
+      <section className="ar-card" style={{ background: '#fff', border: '1px solid #eee', borderRadius: 12, padding: 14, display: 'grid', gap: 12 }}>
         {/* Photo */}
         <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Photo</label>
-          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 10, alignItems: 'center' }}>
+          <div className="ar-photo-row" style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 10, alignItems: 'center' }}>
             <div style={{ width: 110, height: 110, borderRadius: 10, overflow: 'hidden', border: '1px solid #e5e7eb', background: '#f8fafc', display: 'grid', placeItems: 'center', fontSize: 12, textAlign: 'center' }}>
               {photoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img alt="Recipe" src={photoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (<span>No photo</span>)}
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button type="button" onClick={onPickFile} style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: 8 }}>
+            <div className="ar-photo-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" onClick={onPickFile} className="ar-btn">
                 {photoUrl ? 'Change Photo' : 'Upload Photo'}
               </button>
               {photoUrl && (
                 <>
-                  <button type="button" onClick={() => setShowCropper(true)} style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: 8 }}>
-                    Edit Crop
-                  </button>
-                  <button type="button" onClick={removePhoto} style={{ background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', padding: '8px 12px', borderRadius: 8 }}>
-                    Remove Photo
-                  </button>
+                  <button type="button" onClick={() => setShowCropper(true)} className="ar-btn">Edit Crop</button>
+                  <button type="button" onClick={removePhoto} className="ar-btn-danger">Remove Photo</button>
                 </>
               )}
               <input ref={fileInputRef} type="file" accept="image/*" onChange={onFileChange} style={{ display: 'none' }} />
@@ -703,7 +694,7 @@ function AddRecipeForm() {
         {/* Recipe Type (multi-select chips) */}
         <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Recipe Type</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div className="ar-chips" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {RECIPE_TYPE_OPTIONS.map((opt) => {
               const selected = recipeTypes.includes(opt);
               return (
@@ -724,47 +715,26 @@ function AddRecipeForm() {
           </div>
         </div>
 
-        {/* ---------- Visibility (pill toggle group) ---------- */}
+        {/* Visibility (pill toggle group) */}
         <div style={{ display: 'grid', gap: 6 }}>
           <label style={{ fontWeight: 600 }}>Who can view my recipe:</label>
-          <div role="radiogroup" aria-label="Who can view my recipe" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <div role="radiogroup" aria-label="Who can view my recipe" className="ar-chips" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <label style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <input
-                type="radio"
-                name="visibility"
-                value="public"
-                checked={visibility === 'public'}
-                onChange={() => setVisibility('public')}
-                style={{ display: 'none' }}
-              />
+              <input type="radio" name="visibility" value="public" checked={visibility === 'public'} onChange={() => setVisibility('public')} style={{ display: 'none' }} />
               <span style={visibility === 'public' ? chipActive : chipBase}>Public</span>
             </label>
             <label style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <input
-                type="radio"
-                name="visibility"
-                value="friends"
-                checked={visibility === 'friends'}
-                onChange={() => setVisibility('friends')}
-                style={{ display: 'none' }}
-              />
+              <input type="radio" name="visibility" value="friends" checked={visibility === 'friends'} onChange={() => setVisibility('friends')} style={{ display: 'none' }} />
               <span style={visibility === 'friends' ? chipActive : chipBase}>Friends</span>
             </label>
             <label style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <input
-                type="radio"
-                name="visibility"
-                value="private"
-                checked={visibility === 'private'}
-                onChange={() => setVisibility('private')}
-                style={{ display: 'none' }}
-              />
+              <input type="radio" name="visibility" value="private" checked={visibility === 'private'} onChange={() => setVisibility('private')} style={{ display: 'none' }} />
               <span style={visibility === 'private' ? chipActive : chipBase}>Private</span>
             </label>
           </div>
         </div>
 
-        {/* ------------ SIMPLE MODE (default) ------------ */}
+        {/* SIMPLE MODE (default) */}
         {!useComponents && (
           <>
             {/* Ingredients */}
@@ -786,7 +756,7 @@ function AddRecipeForm() {
                 ))}
               </div>
               <div>
-                <button type="button" onClick={() => setIngredients([...ingredients, ''])} style={{ background: 'transparent', border: '1px dashed #cbd5e1', padding: '8px 12px', borderRadius: 8 }}>
+                <button type="button" onClick={() => setIngredients([...ingredients, ''])} className="ar-btn-dashed">
                   + Add ingredient
                 </button>
               </div>
@@ -807,11 +777,11 @@ function AddRecipeForm() {
             </div>
 
             {/* Add Component CTA + info */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="ar-info-row" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={enterComponentModeFromSimple}
-                style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: 8 }}
+                className="ar-btn"
               >
                 Add Component
               </button>
@@ -820,21 +790,10 @@ function AddRecipeForm() {
                 type="button"
                 aria-label="What are components?"
                 onClick={() => setShowInfo(v => !v)}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', lineHeight: 0 }}
+                className="ar-icon"
                 title="What are components?"
               >
-                {/* Cleaner “i” info icon */}
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#6b7280"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="16" x2="12" y2="12" />
                   <line x1="12" y1="8" x2="12.01" y2="8" />
@@ -842,17 +801,7 @@ function AddRecipeForm() {
               </button>
 
               {showInfo && (
-                <div
-                  role="tooltip"
-                  style={{
-                    background: '#fff',
-                    border: '1px solid #e5e7eb',
-                    color: '#374151',
-                    borderRadius: 8,
-                    padding: '8px 10px',
-                    fontSize: 13,
-                  }}
-                >
+                <div role="tooltip" className="ar-tip">
                   Use <b>components</b> for recipes with multiple parts (e.g., cake + frosting)
                   where each part has its own ingredients and instructions.
                 </div>
@@ -861,19 +810,17 @@ function AddRecipeForm() {
           </>
         )}
 
-        {/* ------------ COMPONENT MODE (accordion) ------------ */}
+        {/* COMPONENT MODE (accordion) */}
         {useComponents && (
           <div style={{ display: 'grid', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
               <div style={{ fontWeight: 600 }}>Components</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button type="button" onClick={addComponent} style={{ background: 'transparent', border: '1px solid #cbd5e1', padding: '8px 12px', borderRadius: 8 }}>
-                  + Add Component
-                </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" onClick={addComponent} className="ar-btn">+ Add Component</button>
                 <button
                   type="button"
                   onClick={() => { setUseComponents(false); setComponents([]); }}
-                  style={{ background: 'transparent', border: '1px solid #e5e7eb', padding: '8px 12px', borderRadius: 8 }}
+                  className="ar-btn-light"
                   title="Return to simple ingredients & instructions"
                 >
                   Use Simple Fields
@@ -882,34 +829,22 @@ function AddRecipeForm() {
             </div>
 
             {components.map((c, idx) => (
-              <div key={c.id} style={{ border: '1px solid #e5e7eb', borderRadius: 10 }}>
+              <div key={c.id} className="ar-accordion">
                 {/* Header row */}
                 <button
                   type="button"
                   onClick={() => toggleCollapsed(c.id)}
                   aria-expanded={!c.collapsed}
-                  style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    background: '#f8fafc',
-                    border: 'none',
-                    padding: '10px 12px',
-                    borderTopLeftRadius: 10,
-                    borderTopRightRadius: 10,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                  }}
+                  className="ar-accordion-head"
                 >
                   <span style={{ fontWeight: 600 }}>
                     {c.title?.trim() || `Component ${idx + 1}`}
                   </span>
-                  <span aria-hidden="true" style={{ transform: c.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform .15s ease' }}>▾</span>
+                  <span aria-hidden="true" className={`ar-caret ${c.collapsed ? 'rot' : ''}`}>▾</span>
                 </button>
 
                 {!c.collapsed && (
-                  <div style={{ padding: 12, display: 'grid', gap: 10 }}>
+                  <div className="ar-accordion-body">
                     {/* Title */}
                     <div style={{ display: 'grid', gap: 6 }}>
                       <label style={{ fontWeight: 600 }}>Component Title</label>
@@ -939,7 +874,7 @@ function AddRecipeForm() {
                         <button
                           type="button"
                           onClick={() => addComponentIngredientRow(c.id)}
-                          style={{ background: 'transparent', border: '1px dashed #cbd5e1', padding: '8px 12px', borderRadius: 8 }}
+                          className="ar-btn-dashed"
                         >
                           + Add ingredient
                         </button>
@@ -964,7 +899,7 @@ function AddRecipeForm() {
                       <button
                         type="button"
                         onClick={() => deleteComponent(c.id)}
-                        style={{ background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', padding: '8px 12px', borderRadius: 8 }}
+                        className="ar-btn-danger"
                       >
                         Delete Component
                       </button>
@@ -977,11 +912,11 @@ function AddRecipeForm() {
         )}
 
         {/* Action buttons inside the card */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
-          <button type="button" onClick={() => router.back()} style={{ width: '100%', background: 'transparent', border: '1px solid #e5e7eb', borderRadius: 8, padding: '12px 14px' }}>
+        <div className="ar-actions" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+          <button type="button" onClick={() => router.back()} className="ar-btn-light">
             Cancel
           </button>
-          <button type="button" onClick={submit} disabled={busy} style={{ width: '100%', background: '#111827', color: 'white', border: 'none', borderRadius: 8, padding: '12px 14px', opacity: busy ? 0.7 : 1 }}>
+          <button type="button" onClick={submit} disabled={busy} className="ar-btn-primary">
             {busy ? 'Saving…' : isEditing ? 'Save Changes' : 'Save Recipe'}
           </button>
         </div>
@@ -989,7 +924,7 @@ function AddRecipeForm() {
         {/* Danger: Delete (only in edit mode) */}
         {isEditing && (
           <div style={{ marginTop: 4 }}>
-            <button type="button" onClick={deleteRecipe} style={{ width: '100%', background: 'transparent', border: '1px solid #ef4444', color: '#ef4444', borderRadius: 8, padding: '12px 14px' }}>
+            <button type="button" onClick={deleteRecipe} className="ar-btn-danger" style={{ width: '100%' }}>
               Delete Recipe
             </button>
           </div>
@@ -998,10 +933,10 @@ function AddRecipeForm() {
 
       {/* Cropper modal */}
       {showCropper && (
-        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'grid', placeItems: 'center', zIndex: 50, padding: 16 }}>
-          <div style={{ width: 'min(92vw, 520px)', background: '#fff', borderRadius: 12, overflow: 'hidden', border: '1px solid #e5e7eb', display: 'grid', gridTemplateRows: 'auto 1fr auto' }}>
-            <div style={{ padding: 12, borderBottom: '1px solid #f1f5f9', fontWeight: 600 }}>Adjust Photo</div>
-            <div style={{ position: 'relative', height: 360 }}>
+        <div role="dialog" aria-modal="true" className="ar-modal">
+          <div className="ar-modal-card">
+            <div className="ar-modal-head">Adjust Photo</div>
+            <div className="ar-cropper-wrap">
               {localPhotoSrc && (
                 <Cropper
                   image={localPhotoSrc}
@@ -1017,13 +952,25 @@ function AddRecipeForm() {
                 />
               )}
             </div>
-            <div style={{ padding: 12, borderTop: '1px solid #f1f5f9' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <input type="range" min={1} max={3} step={0.01} value={zoom} onChange={(e) => setZoom(parseFloat(e.target.value))} style={{ gridColumn: '1 / -1', width: '100%' }} />
-                <button type="button" onClick={() => { if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc); setLocalPhotoSrc(null); setShowCropper(false); }} style={{ width: '100%', background: 'transparent', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px' }}>
+            <div className="ar-modal-foot">
+              <div className="ar-modal-actions">
+                <input
+                  type="range"
+                  min={1}
+                  max={3}
+                  step={0.01}
+                  value={zoom}
+                  onChange={(e) => setZoom(parseFloat(e.target.value))}
+                  className="ar-zoom"
+                />
+                <button
+                  type="button"
+                  onClick={() => { if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc); setLocalPhotoSrc(null); setShowCropper(false); }}
+                  className="ar-btn-light"
+                >
                   Cancel
                 </button>
-                <button type="button" onClick={confirmCrop} style={{ width: '100%', background: '#111827', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 12px' }}>
+                <button type="button" onClick={confirmCrop} className="ar-btn-primary">
                   Save
                 </button>
               </div>
@@ -1031,6 +978,153 @@ function AddRecipeForm() {
           </div>
         </div>
       )}
+
+      {/* Responsive styles */}
+      <style jsx>{`
+        .ar-container { box-sizing: border-box; }
+        .ar-card :global(input), 
+        .ar-card :global(textarea), 
+        .ar-card :global(select) { font-size: 16px; } /* iOS no-zoom */
+
+        .ar-btn, .ar-btn-light, .ar-btn-primary, .ar-btn-danger, .ar-btn-dashed {
+          padding: 10px 12px;
+          border-radius: 8px;
+          font-size: 14px;
+          line-height: 1.2;
+          background: transparent;
+          border: 1px solid #cbd5e1;
+        }
+        .ar-btn-primary {
+          background: #111827;
+          color: #fff;
+          border-color: #111827;
+        }
+        .ar-btn-light {
+          background: #fff;
+          border: 1px solid #e5e7eb;
+        }
+        .ar-btn-danger {
+          color: #ef4444;
+          border: 1px solid #ef4444;
+          background: #fff;
+        }
+        .ar-btn-dashed {
+          border-style: dashed;
+        }
+
+        .ar-icon {
+          background: transparent;
+          border: none;
+          padding: 6px;
+          border-radius: 6px;
+        }
+        .ar-tip {
+          background: #fff;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+          padding: 8px 10px;
+          font-size: 13px;
+        }
+
+        .ar-accordion {
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          overflow: hidden;
+        }
+        .ar-accordion-head {
+          width: 100%;
+          text-align: left;
+          background: #f8fafc;
+          border: none;
+          padding: 10px 12px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          cursor: pointer;
+        }
+        .ar-accordion-body {
+          padding: 12px;
+          display: grid;
+          gap: 10px;
+        }
+        .ar-caret { transition: transform .15s ease; }
+        .ar-caret.rot { transform: rotate(-90deg); }
+
+        /* Modal */
+        .ar-modal {
+          position: fixed; inset: 0;
+          background: rgba(0,0,0,0.5);
+          display: grid; place-items: center;
+          z-index: 50; padding: 12px;
+        }
+        .ar-modal-card {
+          width: min(92vw, 520px);
+          background: #fff;
+          border-radius: 12px;
+          overflow: hidden;
+          border: 1px solid #e5e7eb;
+          display: grid;
+          grid-template-rows: auto 1fr auto;
+          max-height: 90vh;
+        }
+        .ar-modal-head {
+          padding: 12px;
+          border-bottom: 1px solid #f1f5f9;
+          font-weight: 600;
+        }
+        .ar-cropper-wrap {
+          position: relative;
+          height: 60vh;           /* flexible on most screens */
+          min-height: 280px;      /* usable on tiny devices */
+          max-height: 520px;      /* keep it reasonable on tablets */
+        }
+        .ar-modal-foot {
+          padding: 12px;
+          border-top: 1px solid #f1f5f9;
+        }
+        .ar-modal-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 10px;
+          align-items: center;
+        }
+        .ar-zoom { grid-column: 1 / -1; }
+
+        /* --------- Responsive tweaks --------- */
+
+        /* Small phones: stack photo row, full-width buttons, bigger touch targets */
+        @media (max-width: 380px) {
+          .ar-container { padding: 12px; }
+          .ar-header h1 { font-size: 18px; }
+
+          .ar-photo-row {
+            grid-template-columns: 1fr; /* stack preview and actions */
+          }
+          .ar-photo-actions { gap: 6px; }
+          .ar-chips > * { font-size: 13px; padding: 7px 10px; }
+
+          .ar-actions {
+            grid-template-columns: 1fr; /* stack Save/Cancel */
+          }
+          .ar-modal-card { width: 96vw; }
+          .ar-cropper-wrap {
+            height: 52vh;
+            min-height: 240px;
+          }
+        }
+
+        /* Ultra-narrow (legacy 320px) */
+        @media (max-width: 330px) {
+          .ar-chips { gap: 6px; }
+          .ar-btn, .ar-btn-light, .ar-btn-primary, .ar-btn-danger, .ar-btn-dashed {
+            padding: 9px 10px;
+            font-size: 13.5px;
+          }
+        }
+
+        /* iPad portrait still uses your wide layout; nothing special needed.
+           If you want tighter paddings on large tablets/desktops, add a min-width rule. */
+      `}</style>
     </main>
   );
 }
