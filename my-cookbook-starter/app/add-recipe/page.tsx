@@ -290,7 +290,7 @@ function AddRecipeForm() {
     }
   }
 
-  // Freeze background scroll while cropper is open
+  // Freeze background scroll while cropper is open (belt & suspenders; AvatarCropModal also handles this)
   useEffect(() => {
     if (!showCropper) return;
     const prev = document.body.style.overflow;
@@ -333,7 +333,6 @@ function AddRecipeForm() {
 
   // ------ COMPONENT HELPERS ------
   function enterComponentModeFromSimple() {
-    // Build a single "Main" component using existing simple fields
     const first: UiComponent = {
       id: crypto.randomUUID(),
       title: 'Main',
@@ -379,7 +378,6 @@ function AddRecipeForm() {
     setMsg(null);
     if (!title.trim()) return setMsg('Please add a title');
 
-    // Validate depending on mode
     if (!useComponents) {
       if (!instructions.trim()) return setMsg('Add instructions (one step per line)');
     } else {
@@ -875,7 +873,11 @@ function AddRecipeForm() {
         <AvatarCropModal
           open
           imageSrc={localPhotoSrc}
-          aspect={1} // keep square for recipe images
+          aspect={1}                // square recipe images
+          cropShape="rect"          // square/rect crop
+          title="Adjust Photo"
+          showGrid={true}           // rule-of-thirds
+          showCenterGuides={true}   // crosshair guides
           onCancel={() => {
             try { if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc); } catch {}
             setLocalPhotoSrc(null);
@@ -898,13 +900,12 @@ function AddRecipeForm() {
                 .upload(newPath, blob, { contentType: 'image/jpeg' });
               if (upRes.error) throw upRes.error;
 
-              const { data: pub } = supabase
+              const { data: pub } = await supabase
                 .storage
                 .from('recipe-photos')
                 .getPublicUrl(newPath);
               const newPublicUrl = pub.publicUrl;
 
-              // if editing, persist to DB right away
               if (isEditing && editId) {
                 const { error: upErr } = await supabase
                   .from('recipes')
@@ -913,7 +914,6 @@ function AddRecipeForm() {
                 if (upErr) throw upErr;
               }
 
-              // auto-delete previous file if it existed and changed
               const prevPath = oldPhotoPathRef.current;
               if (prevPath && prevPath !== newPath) {
                 await supabase.storage.from('recipe-photos').remove([prevPath]);
@@ -1005,24 +1005,21 @@ function AddRecipeForm() {
         .ar-caret.rot { transform: rotate(-90deg); }
 
         /* --------- Responsive tweaks --------- */
-
-        /* Small phones: stack photo row, full-width buttons, bigger touch targets */
         @media (max-width: 380px) {
           .ar-container { padding: 12px; }
           .ar-header h1 { font-size: 18px; }
 
           .ar-photo-row {
-            grid-template-columns: 1fr; /* stack preview and actions */
+            grid-template-columns: 1fr;
           }
           .ar-photo-actions { gap: 6px; }
           .ar-chips > * { font-size: 13px; padding: 7px 10px; }
 
           .ar-actions {
-            grid-template-columns: 1fr; /* stack Save/Cancel */
+            grid-template-columns: 1fr;
           }
         }
 
-        /* Ultra-narrow (legacy 320px) */
         @media (max-width: 330px) {
           .ar-chips { gap: 6px; }
           .ar-btn, .ar-btn-light, .ar-btn-primary, .ar-btn-danger, .ar-btn-dashed {
