@@ -4,26 +4,28 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Cropper from 'react-easy-crop';
 import type { Area, MediaSize } from 'react-easy-crop';
 
-type NewProps = {
+type CommonProps = {
   open: boolean;
-  imageSrc: string | null;
   aspect?: number;
   cropShape?: 'rect' | 'round';
   title?: string;
+  /** Show rule-of-thirds grid from react-easy-crop (default: true) */
+  showGrid?: boolean;
+  /** Show thin center crosshair guides (default: true) */
+  showCenterGuides?: boolean;
   onCancel: () => void;
-  onSave: (blob: Blob) => void; // returns a Blob (recommended path)
+};
+
+type NewProps = CommonProps & {
+  imageSrc: string | null;
+  onSave: (blob: Blob) => void; // returns a Blob (recommended)
   file?: never;
   onConfirm?: never;
 };
 
-type LegacyProps = {
-  open: boolean;
+type LegacyProps = CommonProps & {
   file: File | null;
-  aspect?: number;
-  cropShape?: 'rect' | 'round';
-  title?: string;
-  onCancel: () => void;
-  onConfirm: (croppedFile: File) => void; // legacy return
+  onConfirm: (croppedFile: File) => void; // legacy File path
   imageSrc?: never;
   onSave?: never;
 };
@@ -38,6 +40,8 @@ export default function AvatarCropModal(props: Props) {
     aspect = DEFAULT_ASPECT,
     cropShape = 'rect',
     title = 'Adjust Photo',
+    showGrid = true,
+    showCenterGuides = true,
     onCancel,
   } = props as any;
 
@@ -53,33 +57,13 @@ export default function AvatarCropModal(props: Props) {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [pixelArea, setPixelArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  // Compute a min zoom so the image always fully covers the crop area
+  // Compute a min zoom so the image stays covering the crop area
   const handleMediaLoaded = useCallback((mediaSize: MediaSize) => {
-    // mediaSize has { width, height, naturalWidth, naturalHeight }
-    // Cropper sizes the crop area to the container; we can infer from container aspect.
-    // For cover: minZoom = max(cropW / imgW, cropH / imgH)
-    const imgW = mediaSize.naturalWidth || mediaSize.width;
-    const imgH = mediaSize.naturalHeight || mediaSize.height;
-
-    // Assume crop area matches container height with given aspect.
-    // We don't have explicit crop px here; but react-easy-crop uses container size internally,
-    // and computing exact px isn't necessary if we scale by aspect:
-    // For aspect A = w/h, we can treat crop box as some k*h by k*w; the ratio below still works
-    // since we only need proportional coverage. A simpler and robust approach:
-    // Choose minZoom so the shorter image side covers the corresponding crop side.
-    const cropAspect = aspect;
-    // We'll assume square container reference; coverage rule:
-    // If cropAspect >= 1 (wider than tall): cropW >= cropH
-    // minZoom such that: imgW*zoom / imgH*zoom >= cropAspect  AND  imgH*zoom >= cropH base
-    // A simpler, safe approximation: use the more demanding side:
-    // minZoom = Math.max(cropAspect > 1 ? cropAspect * (1 / (imgW / imgH)) : (1 / cropAspect) * (1 / (imgH / imgW)), 1)
-    // That gets messy—so we do a pragmatic fallback: start at 1 and let restrictPosition guard edges,
-    // then bump zoom slightly if needed. In practice, this works well:
-    const computed = Math.max(1, 1.001); // keep ≥1; react-easy-crop + restrictPosition prevents gaps
-
+    // Pragmatic starting point; restrictPosition will prevent empty edges.
+    const computed = Math.max(1, 1.001);
     setMinZoom(computed);
     setZoom(computed);
-  }, [aspect]);
+  }, []);
 
   const onCropComplete = useCallback((_area: Area, areaPixels: Area) => {
     setPixelArea({
@@ -109,26 +93,21 @@ export default function AvatarCropModal(props: Props) {
 
   async function handleSave() {
     if (!url || !pixelArea) return;
-    try {
-      const blob = await cropToBlob(url, pixelArea, {
-        mimeType: 'image/jpeg',
-        quality: 0.92,
-        // maxOutputSize: 1600, // uncomment to clamp output size
-      });
+    const blob = await cropToBlob(url, pixelArea, {
+      mimeType: 'image/jpeg',
+      quality: 0.92,
+    });
 
-      // New path: Blob
-      if ('onSave' in props && typeof props.onSave === 'function') {
-        props.onSave(blob);
-        return;
-      }
+    // New path: Blob
+    if ('onSave' in props && typeof props.onSave === 'function') {
+      props.onSave(blob);
+      return;
+    }
 
-      // Legacy path: File
-      if ('onConfirm' in props && typeof props.onConfirm === 'function') {
-        const file = new File([blob], 'crop.jpg', { type: blob.type });
-        props.onConfirm(file);
-      }
-    } catch {
-      // no-op
+    // Legacy path: File
+    if ('onConfirm' in props && typeof props.onConfirm === 'function') {
+      const file = new File([blob], 'crop.jpg', { type: blob.type });
+      props.onConfirm(file);
     }
   }
 
@@ -177,18 +156,50 @@ export default function AvatarCropModal(props: Props) {
             minZoom={minZoom}
             aspect={aspect}
             cropShape={cropShape}
-            showGrid={false}
-            restrictPosition={true}      // keep crop within image (prevents blank areas)
-            zoomWithScroll={false}       // disable wheel zoom; use pinch-to-zoom on touch
+            showGrid={showGrid}          // rule-of-thirds
+            restrictPosition={true}      // keep crop inside image
+            zoomWithScroll={false}       // touch-only zoom (pinch); no wheel zoom
             onMediaLoaded={handleMediaLoaded}
             onCropChange={setCrop}
             onZoomChange={setZoom}
             onCropComplete={onCropComplete}
             objectFit="contain"
           />
+
+          {/* Center guides (optional) */}
+          {showCenterGuides && (
+            <>
+              {/* vertical line */}
+              <div
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  top: 0, bottom: 0,
+                  left: '50%',
+                  width: 0,
+                  borderLeft: '1px dashed rgba(255,255,255,0.6)',
+                  mixBlendMode: 'difference',
+                  pointerEvents: 'none',
+                }}
+              />
+              {/* horizontal line */}
+              <div
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  left: 0, right: 0,
+                  top: '50%',
+                  height: 0,
+                  borderTop: '1px dashed rgba(255,255,255,0.6)',
+                  mixBlendMode: 'difference',
+                  pointerEvents: 'none',
+                }}
+              />
+            </>
+          )}
         </div>
 
-        {/* Sticky footer (no slider; touch-only) */}
+        {/* Sticky footer (safe-area friendly) */}
         <div
           style={{
             position: 'sticky', bottom: 0,
