@@ -9,23 +9,23 @@ type CommonProps = {
   aspect?: number;
   cropShape?: 'rect' | 'round';
   title?: string;
-  /** Show rule-of-thirds grid from react-easy-crop (default: true) */
+  /** Rule-of-thirds grid (default true) */
   showGrid?: boolean;
-  /** Show thin center crosshair guides (default: true) */
+  /** Optional dashed center crosshair (default false) */
   showCenterGuides?: boolean;
   onCancel: () => void;
 };
 
 type NewProps = CommonProps & {
   imageSrc: string | null;
-  onSave: (blob: Blob) => void; // returns a Blob (recommended)
+  onSave: (blob: Blob) => void;
   file?: never;
   onConfirm?: never;
 };
 
 type LegacyProps = CommonProps & {
   file: File | null;
-  onConfirm: (croppedFile: File) => void; // legacy File path
+  onConfirm: (croppedFile: File) => void;
   imageSrc?: never;
   onSave?: never;
 };
@@ -41,25 +41,26 @@ export default function AvatarCropModal(props: Props) {
     cropShape = 'rect',
     title = 'Adjust Photo',
     showGrid = true,
-    showCenterGuides = true,
+    showCenterGuides = false, // default off; turn on by passing true
     onCancel,
   } = props as any;
 
-  // URL fed to Cropper
+  // Source URL for the cropper
   const url = useMemo(() => {
     if ('imageSrc' in props) return props.imageSrc || '';
     if ('file' in props && props.file) return URL.createObjectURL(props.file);
     return '';
   }, [props]);
 
+  // Keep pinch zoom (no slider UI)
   const [zoom, setZoom] = useState(1);
   const [minZoom, setMinZoom] = useState(1);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [pixelArea, setPixelArea] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  // Compute a min zoom so the image stays covering the crop area
+  // Ensure the image always covers the crop area; start at a safe min zoom
   const handleMediaLoaded = useCallback((mediaSize: MediaSize) => {
-    // Pragmatic starting point; restrictPosition will prevent empty edges.
+    // react-easy-crop will clamp to minZoom; setting slightly above 1 avoids tiny gaps on some images
     const computed = Math.max(1, 1.001);
     setMinZoom(computed);
     setZoom(computed);
@@ -82,29 +83,21 @@ export default function AvatarCropModal(props: Props) {
     return () => { document.body.style.overflow = prev; };
   }, [open]);
 
-  // Revoke legacy object URL created from File on unmount
+  // Revoke legacy object URL created from File on unmount (when using file prop)
   useEffect(() => {
     if (!('file' in props) || !props.file) return;
     const objUrl = URL.createObjectURL(props.file);
-    return () => {
-      try { URL.revokeObjectURL(objUrl); } catch {}
-    };
+    return () => { try { URL.revokeObjectURL(objUrl); } catch {} };
   }, [props]);
 
   async function handleSave() {
     if (!url || !pixelArea) return;
-    const blob = await cropToBlob(url, pixelArea, {
-      mimeType: 'image/jpeg',
-      quality: 0.92,
-    });
+    const blob = await cropToBlob(url, pixelArea, { mimeType: 'image/jpeg', quality: 0.92 });
 
-    // New path: Blob
     if ('onSave' in props && typeof props.onSave === 'function') {
       props.onSave(blob);
       return;
     }
-
-    // Legacy path: File
     if ('onConfirm' in props && typeof props.onConfirm === 'function') {
       const file = new File([blob], 'crop.jpg', { type: blob.type });
       props.onConfirm(file);
@@ -147,18 +140,18 @@ export default function AvatarCropModal(props: Props) {
           </button>
         </div>
 
-        {/* Cropper area */}
+        {/* Cropper */}
         <div style={{ position: 'relative', background: '#0b0b0c', height: '60vh', minHeight: 260 }}>
           <Cropper
             image={url}
             crop={crop}
-            zoom={zoom}
+            zoom={zoom}                 // pinch-to-zoom enabled
             minZoom={minZoom}
             aspect={aspect}
             cropShape={cropShape}
-            showGrid={showGrid}          // rule-of-thirds
-            restrictPosition={true}      // keep crop inside image
-            zoomWithScroll={false}       // touch-only zoom (pinch); no wheel zoom
+            showGrid={showGrid}         // rule-of-thirds grid
+            restrictPosition={true}     // keep crop inside image
+            zoomWithScroll={false}      // disable mouse/touchpad wheel; pinch still works
             onMediaLoaded={handleMediaLoaded}
             onCropChange={setCrop}
             onZoomChange={setZoom}
@@ -166,40 +159,16 @@ export default function AvatarCropModal(props: Props) {
             objectFit="contain"
           />
 
-          {/* Center guides (optional) */}
+          {/* Optional center crosshair (off by default) */}
           {showCenterGuides && (
             <>
-              {/* vertical line */}
-              <div
-                aria-hidden
-                style={{
-                  position: 'absolute',
-                  top: 0, bottom: 0,
-                  left: '50%',
-                  width: 0,
-                  borderLeft: '1px dashed rgba(255,255,255,0.6)',
-                  mixBlendMode: 'difference',
-                  pointerEvents: 'none',
-                }}
-              />
-              {/* horizontal line */}
-              <div
-                aria-hidden
-                style={{
-                  position: 'absolute',
-                  left: 0, right: 0,
-                  top: '50%',
-                  height: 0,
-                  borderTop: '1px dashed rgba(255,255,255,0.6)',
-                  mixBlendMode: 'difference',
-                  pointerEvents: 'none',
-                }}
-              />
+              <div aria-hidden style={{ position: 'absolute', top: 0, bottom: 0, left: '50%', width: 0, borderLeft: '1px dashed rgba(255,255,255,0.6)', pointerEvents: 'none' }} />
+              <div aria-hidden style={{ position: 'absolute', left: 0, right: 0, top: '50%', height: 0, borderTop: '1px dashed rgba(255,255,255,0.6)', pointerEvents: 'none' }} />
             </>
           )}
         </div>
 
-        {/* Sticky footer (safe-area friendly) */}
+        {/* Footer (no slider) */}
         <div
           style={{
             position: 'sticky', bottom: 0,
@@ -228,7 +197,7 @@ export default function AvatarCropModal(props: Props) {
   );
 }
 
-/** Crop a region from an image URL into a Blob using canvas. */
+/** Canvas crop helper */
 async function cropToBlob(
   imageUrl: string,
   area: { x: number; y: number; width: number; height: number },
@@ -250,21 +219,13 @@ async function cropToBlob(
   canvas.width = outW;
   canvas.height = outH;
   const ctx = canvas.getContext('2d')!;
-
-  ctx.drawImage(
-    img,
-    area.x, area.y, area.width, area.height,
-    0, 0, outW, outH
-  );
-
-  const mime = opts?.mimeType ?? 'image/jpeg';
-  const quality = opts?.quality ?? 0.92;
+  ctx.drawImage(img, area.x, area.y, area.width, area.height, 0, 0, outW, outH);
 
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
       if (!blob) return reject(new Error('Failed to export crop'));
       resolve(blob);
-    }, mime, quality);
+    }, opts?.mimeType ?? 'image/jpeg', opts?.quality ?? 0.92);
   });
 }
 
