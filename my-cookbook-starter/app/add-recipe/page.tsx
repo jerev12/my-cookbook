@@ -29,7 +29,7 @@ type DBStep = {
   section_label: string | null;
 };
 
-// Suggested recipe type options (you can change these anytime)
+// Suggested recipe type options
 const RECIPE_TYPE_OPTIONS = [
   'Breakfast',
   'Lunch',
@@ -67,12 +67,12 @@ export default function AddRecipePage() {
 // ---------- Reusable field style ----------
 const fieldStyle: React.CSSProperties = {
   width: '100%',
-  padding: 10, // keep ≥10px for tap targets
+  padding: 10,
   borderRadius: 6,
   border: '1px solid #e5e7eb',
   background: '#fff',
   boxSizing: 'border-box',
-  fontSize: 16, // ≥16px prevents iOS zoom-on-focus
+  fontSize: 16,
   lineHeight: 1.35,
 };
 
@@ -97,8 +97,8 @@ const chipActive: React.CSSProperties = {
 type UiComponent = {
   id: string;
   title: string;
-  ingredients: string[];    // simple item lines
-  instructions: string;     // one step per line
+  ingredients: string[];
+  instructions: string;
   collapsed?: boolean;
 };
 
@@ -210,7 +210,6 @@ function AddRecipeForm() {
       const hasMultiple = labels.size > 1 || (labels.size === 1 && !labels.has('Main'));
 
       if (hasMultiple) {
-        // Build components from labels
         const orderedLabels = Array.from(labels);
         const built: UiComponent[] = orderedLabels.map(lbl => {
           const ingList = ings
@@ -231,11 +230,9 @@ function AddRecipeForm() {
         });
         setComponents(built);
         setUseComponents(true);
-        // hide simple fields
         setIngredients(['']);
         setInstructions('');
       } else {
-        // Simple mode: fill simple fields
         const ingStrings = ings.length ? ings.map(i => i.item_name) : [''];
         setIngredients(ingStrings);
         const stepLines = steps.sort((a,b)=>a.step_number-b.step_number).map(s => s.body);
@@ -290,13 +287,8 @@ function AddRecipeForm() {
     }
   }
 
-  // Freeze background scroll while cropper is open (belt & suspenders; AvatarCropModal also handles this)
-  useEffect(() => {
-    if (!showCropper) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, [showCropper]);
+  // NOTE: removed the local body-scroll lock useEffect to avoid post-close “stuck scroll”.
+  // AvatarCropModal handles locking/unlocking scroll while it’s open.
 
   // ------ DELETE RECIPE (Edit mode) ------
   async function deleteRecipe() {
@@ -597,11 +589,9 @@ function AddRecipeForm() {
               <button type="button" onClick={onPickFile} className="ar-btn">
                 {photoUrl ? 'Change Photo' : 'Upload Photo'}
               </button>
+              {/* Removed separate "Edit Crop" button */}
               {photoUrl && (
-                <>
-                  <button type="button" onClick={() => setShowCropper(true)} className="ar-btn">Edit Crop</button>
-                  <button type="button" onClick={removePhoto} className="ar-btn-danger">Remove Photo</button>
-                </>
+                <button type="button" onClick={removePhoto} className="ar-btn-danger">Remove Photo</button>
               )}
               <input ref={fileInputRef} type="file" accept="image/*" onChange={onFileChange} style={{ display: 'none' }} />
             </div>
@@ -767,7 +757,6 @@ function AddRecipeForm() {
 
             {components.map((c, idx) => (
               <div key={c.id} className="ar-accordion">
-                {/* Header row */}
                 <button
                   type="button"
                   onClick={() => toggleCollapsed(c.id)}
@@ -782,7 +771,6 @@ function AddRecipeForm() {
 
                 {!c.collapsed && (
                   <div className="ar-accordion-body">
-                    {/* Title */}
                     <div style={{ display: 'grid', gap: 6 }}>
                       <label style={{ fontWeight: 600 }}>Component Title</label>
                       <input
@@ -793,7 +781,6 @@ function AddRecipeForm() {
                       />
                     </div>
 
-                    {/* Ingredients (per component) */}
                     <div style={{ display: 'grid', gap: 6 }}>
                       <label style={{ fontWeight: 600 }}>Ingredients</label>
                       <div style={{ display: 'grid', gap: 6 }}>
@@ -818,7 +805,6 @@ function AddRecipeForm() {
                       </div>
                     </div>
 
-                    {/* Instructions (per component) */}
                     <div style={{ display: 'grid', gap: 6 }}>
                       <label style={{ fontWeight: 600 }}>
                         Instructions <span style={{ color: '#6b7280', fontWeight: 400 }}>(one step per line)</span>
@@ -861,23 +847,23 @@ function AddRecipeForm() {
         {/* Danger: Delete (only in edit mode) */}
         {isEditing && (
           <div style={{ marginTop: 4 }}>
-            <button type="button" onClick={deleteRecipe} className="ar-btn-danger" style={{ width: '100%' }}>
+            <button type="button" onClick={deleteComponent as any} className="ar-btn-danger" style={{ width: '100%' }}>
               Delete Recipe
             </button>
           </div>
         )}
       </section>
 
-      {/* Shared cropper modal (reuses your AvatarCropModal) */}
+      {/* Shared cropper modal */}
       {showCropper && localPhotoSrc && (
         <AvatarCropModal
           open
           imageSrc={localPhotoSrc}
-          aspect={1}                // square recipe images
-          cropShape="rect"          // square/rect crop
+          aspect={1}              // square recipe images
+          cropShape="rect"        // rectangular mask
           title="Adjust Photo"
-          showGrid={true}           // rule-of-thirds
-          showCenterGuides={true}   // crosshair guides
+          showGrid={true}         // rule-of-thirds grid ON
+          // showCenterGuides removed
           onCancel={() => {
             try { if (localPhotoSrc) URL.revokeObjectURL(localPhotoSrc); } catch {}
             setLocalPhotoSrc(null);
