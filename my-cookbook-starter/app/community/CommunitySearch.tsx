@@ -25,12 +25,16 @@ type RecipeRow = {
   source_url: string | null;
   created_at: string | null;
   visibility?: 'public' | 'friends' | 'private' | string;
-  recipe_types?: string[] | null; // <-- use this instead of instructions
+  recipe_types?: string[] | null; // array column
 };
 
 type FriendRelation = 'none' | 'pending_outgoing' | 'pending_incoming' | 'friends';
 
 const PAGE_SIZE = 20;
+
+// Known type pills you use on Add Recipe.
+// We’ll map typed text like "din" -> include recipe_types.cs.{Dinner} in the OR.
+const KNOWN_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Dessert'];
 
 export default function CommunitySearch() {
   const [tab, setTab] = useState<TabKey>('recipes');
@@ -118,12 +122,29 @@ export default function CommunitySearch() {
 
         setRecipes([]);
       } else {
+        // RECIPES: search by title/cuisine (ILIKE) + recipe_types (array contains)
+        const safeQ = escapeLike(debouncedQ);
+        const like = `%${safeQ}%`;
+
+        // Match user text to one or more known type tokens (case-insensitive, substring ok).
+        const qLower = debouncedQ.toLowerCase();
+        const matchedTypes = KNOWN_TYPES.filter(t => t.toLowerCase().includes(qLower));
+
+        // Build the OR list:
+        // - title.ilike.%q%
+        // - cuisine.ilike.%q%
+        // - (optionally) recipe_types.cs.{Dinner}, recipe_types.cs.{Lunch}, ...
+        const orParts = [
+          `title.ilike.${like}`,
+          `cuisine.ilike.${like}`,
+          // DO NOT put .ilike on recipe_types (it's an array); use cs with a brace-wrapped element.
+          ...matchedTypes.map(t => `recipe_types.cs.{${t}}`),
+        ];
+
         const { data, error } = await supabase
           .from('recipes')
           .select('id,user_id,title,cuisine,photo_url,source_url,created_at,recipe_types')
-          .or(
-            `title.ilike.%${debouncedQ}%,cuisine.ilike.%${debouncedQ}%,recipe_types.ilike.%${debouncedQ}%`
-          )
+          .or(orParts.join(','))
           .order('created_at', { ascending: false })
           .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
 
@@ -208,6 +229,11 @@ export default function CommunitySearch() {
       });
       return copy;
     });
+  }
+
+  // Escape % and _ so they don't act as wildcards from user input
+  function escapeLike(s: string) {
+    return s.replace(/[%_]/g, m => '\\' + m);
   }
 
   const S = {
@@ -384,7 +410,6 @@ export default function CommunitySearch() {
           {loading && <div style={S.hint}>Searching…</div>}
           {!loading && errMsg && <div style={S.error}>{errMsg}</div>}
 
-          {/* Users list */}
           {!loading && !errMsg && tab === 'users' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 ? (
@@ -451,7 +476,6 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Recipes grid */}
           {!loading && !errMsg && tab === 'recipes' && (
             <div style={S.cardList}>
               {recipes.length === 0 ? (
