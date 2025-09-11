@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
-// IMPORTANT: use your badge component
 const RecipeBadges: any = dynamic(() => import('../components/RecipeBadges'), { ssr: false });
 
 type TabKey = 'recipes' | 'users';
@@ -267,12 +266,11 @@ export default function CommunitySearch() {
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
 
-    // Users list cards (unchanged)
     userRow: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      border: '1px solid #e5e7eb',
+      border: '1px solid '#e5e7eb',
       borderRadius: 8,
       padding: 8,
       gap: 8,
@@ -295,7 +293,7 @@ export default function CommunitySearch() {
     } as CSSProperties,
 
     btn: {
-      border: '1px solid #e5e7eb',
+      border: '1px solid '#e5e7eb',
       borderRadius: 6,
       padding: '6px 8px',
       background: '#fff',
@@ -303,7 +301,7 @@ export default function CommunitySearch() {
       cursor: 'pointer',
     } as CSSProperties,
     btnDark: {
-      border: '1px solid #111827',
+      border: '1px solid '#111827',
       background: '#111827',
       color: '#fff',
     } as CSSProperties,
@@ -371,7 +369,7 @@ export default function CommunitySearch() {
           {loading && <div style={S.hint}>Searching…</div>}
           {!loading && errMsg && <div style={S.error}>{errMsg}</div>}
 
-          {/* Users list */}
+          {/* Users */}
           {!loading && !errMsg && tab === 'users' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 ? (
@@ -438,26 +436,21 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Recipes list — now using your RecipeBadges component */}
+          {/* Recipes — ONE BADGE PER RECIPE */}
           {!loading && !errMsg && tab === 'recipes' && (
-            <div>
-              {/* If your RecipeBadges component expects a LIST: */}
-              {Array.isArray((RecipeBadges as any)?.defaultProps?.recipes) || 'recipes' in (RecipeBadges as any) ? (
-                <RecipeBadges
-                  recipes={recipes}
-                  onRecipeClick={(r: RecipeRow) => openRecipe(r.id)}
-                />
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12 }}>
+              {recipes.length === 0 ? (
+                <div style={S.hint}>No recipes found.</div>
               ) : (
-                // Fallback: render one badge per recipe if component expects a single item
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12 }}>
-                  {recipes.length === 0 ? (
-                    <div style={S.hint}>No recipes found.</div>
-                  ) : (
-                    recipes.map((r) => (
-                      <RecipeBadges key={r.id} recipe={r} onClick={() => openRecipe(r.id)} />
-                    ))
-                  )}
-                </div>
+                recipes.map((r) => (
+                  <RecipeBadges
+                    key={r.id}
+                    recipe={r}
+                    // support either prop your badge might use:
+                    onClick={() => openRecipe(r.id)}
+                    onRecipeClick={() => openRecipe(r.id)}
+                  />
+                ))
               )}
             </div>
           )}
