@@ -270,7 +270,7 @@ export default function CommunitySearch() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      border: '1px solid '#e5e7eb',
+      border: '1px solid #e5e7eb',
       borderRadius: 8,
       padding: 8,
       gap: 8,
