@@ -301,7 +301,7 @@ export default function CommunitySearch() {
       cursor: 'pointer',
     } as CSSProperties,
     btnDark: {
-      border: '1px solid '#111827',
+      border: '1px solid #111827',
       background: '#111827',
       color: '#fff',
     } as CSSProperties,
