@@ -5,8 +5,10 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
+// Shared components
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
-const RecipeBadges: any = dynamic(() => import('../components/RecipeBadges'), { ssr: false });
+// Import the tile + grid style from your RecipeBadges file
+import { RecipeTile, recipeGridStyle } from '../components/RecipeBadges';
 
 type TabKey = 'recipes' | 'users';
 
@@ -32,31 +34,38 @@ type RecipeRow = {
 type FriendRelation = 'none' | 'pending_outgoing' | 'pending_incoming' | 'friends';
 
 const PAGE_SIZE = 20;
+// Known types used to map free-text to array-contains filters
 const KNOWN_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Dessert'];
 
 export default function CommunitySearch() {
   const [tab, setTab] = useState<TabKey>('recipes');
 
+  // search input (recipes: title/cuisine/type; users: display_name)
   const [q, setQ] = useState('');
   const debouncedQ = useDebounce(q, 300);
   const queryActive = debouncedQ.trim().length > 0;
 
+  // paging
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
 
+  // data
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<Profile[]>([]);
   const [recipes, setRecipes] = useState<RecipeRow[]>([]);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
+  // me / friendships
   const [myId, setMyId] = useState<string | null>(null);
   const [friendStatus, setFriendStatus] = useState<Record<string, FriendRelation>>({});
 
+  // recipe modal
   const [modalOpen, setModalOpen] = useState(false);
   const [modalRecipe, setModalRecipe] = useState<any>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
+  // current user id
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getUser();
@@ -64,10 +73,12 @@ export default function CommunitySearch() {
     })();
   }, []);
 
+  // reset page whenever inputs change
   useEffect(() => {
     setPage(0);
   }, [tab, debouncedQ]);
 
+  // fetch on deps change (only after user typed something)
   useEffect(() => {
     if (!queryActive) {
       setUsers([]);
@@ -91,6 +102,7 @@ export default function CommunitySearch() {
 
     try {
       if (tab === 'users') {
+        // USERS: keep your RPC
         const { data, error } = await supabase.rpc('search_users', {
           q: debouncedQ || null,
           limit_count: PAGE_SIZE,
@@ -102,6 +114,7 @@ export default function CommunitySearch() {
         setUsers(rows);
         setHasMore(rows.length === PAGE_SIZE);
 
+        // get friend statuses for visible users
         if (rows.length > 0) {
           const ids = rows.map(u => u.id);
           const { data: statuses, error: sErr } = await supabase.rpc('get_friend_statuses', {
@@ -120,15 +133,19 @@ export default function CommunitySearch() {
 
         setRecipes([]);
       } else {
-        // RECIPES: title/cuisine ILIKE + recipe_types (array contains known type)
+        // RECIPES: direct table query (RLS enforces visibility)
+        // Match title, cuisine, OR recipe_types (array contains), NOT instructions.
         const safeQ = escapeLike(debouncedQ);
         const like = `%${safeQ}%`;
+
+        // map text to known type tokens (case-insensitive, substring ok)
         const qLower = debouncedQ.toLowerCase();
         const matchedTypes = KNOWN_TYPES.filter(t => t.toLowerCase().includes(qLower));
 
         const orParts = [
           `title.ilike.${like}`,
           `cuisine.ilike.${like}`,
+          // array-contains for each matched type
           ...matchedTypes.map(t => `recipe_types.cs.{${t}}`),
         ];
 
@@ -155,6 +172,7 @@ export default function CommunitySearch() {
     }
   }
 
+  // Open modal with a fetched recipe object
   async function openRecipe(rid: string) {
     try {
       setModalOpen(true);
@@ -175,14 +193,16 @@ export default function CommunitySearch() {
     }
   }
 
+  // Friend actions
   async function handleToggleRequest(targetId: string, relation: FriendRelation) {
     try {
+      // optimistic flip
       setFriendStatus(prev => ({
         ...prev,
         [targetId]: relation === 'none' ? 'pending_outgoing' : 'none',
       }));
 
-      if (relation === 'none') {
+    if (relation === 'none') {
         const { error } = await supabase.rpc('request_friend', { target_id: targetId });
         if (error) throw error;
       } else if (relation === 'pending_outgoing') {
@@ -195,6 +215,7 @@ export default function CommunitySearch() {
       await refreshStatus([targetId]);
     } catch (e: any) {
       console.error(e);
+      // revert
       setFriendStatus(prev => ({ ...prev, [targetId]: relation }));
       alert(e?.message ?? 'Failed to update friend request.');
     }
@@ -222,10 +243,12 @@ export default function CommunitySearch() {
     });
   }
 
+  // Escape % and _ in LIKE to avoid them acting as wildcards inside user input
   function escapeLike(s: string) {
     return s.replace(/[%_]/g, m => '\\' + m);
   }
 
+  // ------- styles -------
   const S = {
     container: {
       width: '100%',
@@ -266,6 +289,7 @@ export default function CommunitySearch() {
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
 
+    // Users list
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -292,6 +316,7 @@ export default function CommunitySearch() {
       textOverflow: 'ellipsis',
     } as CSSProperties,
 
+    // Buttons
     btn: {
       border: '1px solid #e5e7eb',
       borderRadius: 6,
@@ -369,7 +394,7 @@ export default function CommunitySearch() {
           {loading && <div style={S.hint}>Searching…</div>}
           {!loading && errMsg && <div style={S.error}>{errMsg}</div>}
 
-          {/* Users */}
+          {/* Users list */}
           {!loading && !errMsg && tab === 'users' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 ? (
@@ -382,6 +407,7 @@ export default function CommunitySearch() {
                   let actionEl: JSX.Element = <span style={S.hint}>You</span>;
                   if (!isMe) {
                     if (relation === 'none' || relation === 'pending_outgoing') {
+                      // toggle: add / cancel
                       actionEl = (
                         <button
                           style={{
@@ -397,12 +423,14 @@ export default function CommunitySearch() {
                         </button>
                       );
                     } else if (relation === 'pending_incoming') {
+                      // read-only here
                       actionEl = (
                         <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
                           Requested
                         </button>
                       );
                     } else {
+                      // friends → green button like in Friends modal
                       actionEl = (
                         <button
                           style={{ ...S.btn, ...S.btnGreen, cursor: 'pointer' }}
@@ -436,19 +464,20 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Recipes — ONE BADGE PER RECIPE */}
+          {/* Recipes — render tiles using your shared component */}
           {!loading && !errMsg && tab === 'recipes' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12 }}>
+            <div style={recipeGridStyle}>
               {recipes.length === 0 ? (
                 <div style={S.hint}>No recipes found.</div>
               ) : (
                 recipes.map((r) => (
-                  <RecipeBadges
+                  <RecipeTile
                     key={r.id}
-                    recipe={r}
-                    // support either prop your badge might use:
+                    title={r.title}
+                    types={r.recipe_types ?? []}
+                    photoUrl={r.photo_url}
                     onClick={() => openRecipe(r.id)}
-                    onRecipeClick={() => openRecipe(r.id)}
+                    ariaLabel={`Open ${r.title}`}
                   />
                 ))
               )}
