@@ -293,7 +293,7 @@ export default function CommunitySearch() {
     } as CSSProperties,
 
     btn: {
-      border: '1px solid '#e5e7eb',
+      border: '1px solid #e5e7eb',
       borderRadius: 6,
       padding: '6px 8px',
       background: '#fff',
