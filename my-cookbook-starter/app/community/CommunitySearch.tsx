@@ -25,6 +25,7 @@ type RecipeRow = {
   source_url: string | null;
   created_at: string | null;
   visibility?: 'public' | 'friends' | 'private' | string;
+  recipe_types?: string[] | null; // <-- use this instead of instructions
 };
 
 type FriendRelation = 'none' | 'pending_outgoing' | 'pending_incoming' | 'friends';
@@ -117,16 +118,18 @@ export default function CommunitySearch() {
 
         setRecipes([]);
       } else {
-        const { data, error } = await supabase.rpc('search_recipes', {
-          q: debouncedQ || null,
-          limit_count: PAGE_SIZE,
-          offset_count: page * PAGE_SIZE,
-          cuisine_filter: null,
-        });
+        const { data, error } = await supabase
+          .from('recipes')
+          .select('id,user_id,title,cuisine,photo_url,source_url,created_at,recipe_types')
+          .or(
+            `title.ilike.%${debouncedQ}%,cuisine.ilike.%${debouncedQ}%,recipe_types.ilike.%${debouncedQ}%`
+          )
+          .order('created_at', { ascending: false })
+          .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+
         if (error) throw error;
 
-        let rows = (data as RecipeRow[]) ?? [];
-        rows = await backfillPhotos(rows); // ensure photo_url is present
+        const rows = (data as RecipeRow[]) ?? [];
         setRecipes(rows);
         setHasMore(rows.length === PAGE_SIZE);
         setUsers([]);
@@ -140,28 +143,6 @@ export default function CommunitySearch() {
     }
   }
 
-  async function backfillPhotos(rows: RecipeRow[]): Promise<RecipeRow[]> {
-    if (!rows.length) return rows;
-    const ids = rows.map(r => r.id);
-
-    const { data, error } = await supabase
-      .from('recipes')
-      .select('id, photo_url')
-      .in('id', ids);
-
-    if (error || !data) return rows;
-
-    const photoMap = new Map<string, string | null>();
-    data.forEach((r: { id: string; photo_url: string | null }) => {
-      photoMap.set(r.id, r.photo_url ?? null);
-    });
-
-    return rows.map(r => ({
-      ...r,
-      photo_url: r.photo_url ?? photoMap.get(r.id) ?? null,
-    }));
-  }
-
   async function openRecipe(rid: string) {
     try {
       setModalOpen(true);
@@ -169,7 +150,7 @@ export default function CommunitySearch() {
 
       const { data, error } = await supabase
         .from('recipes')
-        .select('id,user_id,title,cuisine,photo_url,source_url,created_at')
+        .select('id,user_id,title,cuisine,photo_url,source_url,created_at,recipe_types')
         .eq('id', rid)
         .single();
 
@@ -269,7 +250,6 @@ export default function CommunitySearch() {
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
 
-    // Recipe cards (match My Cookbook)
     cardList: {
       display: 'grid',
       gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
@@ -301,7 +281,6 @@ export default function CommunitySearch() {
     rTitle: { fontWeight: 600, marginTop: 6, fontSize: 14 } as CSSProperties,
     rCuisine: { color: '#666', fontSize: 12 } as CSSProperties,
 
-    // Users list
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -328,7 +307,6 @@ export default function CommunitySearch() {
       textOverflow: 'ellipsis',
     } as CSSProperties,
 
-    // Buttons
     btn: {
       border: '1px solid #e5e7eb',
       borderRadius: 6,
@@ -342,7 +320,6 @@ export default function CommunitySearch() {
       background: '#111827',
       color: '#fff',
     } as CSSProperties,
-    // NEW: green Friend button (to match your Friends modal)
     btnGreen: {
       border: '1px solid #4CAF50',
       background: '#4CAF50',
@@ -392,7 +369,7 @@ export default function CommunitySearch() {
       <div style={S.row}>
         <input
           style={S.input}
-          placeholder={tab === 'users' ? 'Search people by name…' : 'Search recipes by title, cuisine, or instructions…'}
+          placeholder={tab === 'users' ? 'Search people by name…' : 'Search recipes by title, cuisine, or type…'}
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
@@ -420,7 +397,6 @@ export default function CommunitySearch() {
                   let actionEl: JSX.Element = <span style={S.hint}>You</span>;
                   if (!isMe) {
                     if (relation === 'none' || relation === 'pending_outgoing') {
-                      // toggle: add / cancel
                       actionEl = (
                         <button
                           style={{
@@ -436,14 +412,12 @@ export default function CommunitySearch() {
                         </button>
                       );
                     } else if (relation === 'pending_incoming') {
-                      // read-only here
                       actionEl = (
                         <button style={{ ...S.btn, ...S.btnDisabled }} disabled>
                           Requested
                         </button>
                       );
                     } else {
-                      // friends → green button like in Friends modal
                       actionEl = (
                         <button
                           style={{ ...S.btn, ...S.btnGreen, cursor: 'pointer' }}
@@ -504,7 +478,6 @@ export default function CommunitySearch() {
             </div>
           )}
 
-          {/* Pager */}
           {!loading && (users.length > 0 || recipes.length > 0) && (
             <div style={S.pager}>
               <button
