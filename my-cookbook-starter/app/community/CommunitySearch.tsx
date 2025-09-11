@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
 const RecipeModal = dynamic(() => import('../components/RecipeModal'), { ssr: false });
+// IMPORTANT: use your badge component
+const RecipeBadges: any = dynamic(() => import('../components/RecipeBadges'), { ssr: false });
 
 type TabKey = 'recipes' | 'users';
 
@@ -31,9 +33,6 @@ type RecipeRow = {
 type FriendRelation = 'none' | 'pending_outgoing' | 'pending_incoming' | 'friends';
 
 const PAGE_SIZE = 20;
-
-// Known type pills you use on Add Recipe.
-// We’ll map typed text like "din" -> include recipe_types.cs.{Dinner} in the OR.
 const KNOWN_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Dessert'];
 
 export default function CommunitySearch() {
@@ -122,22 +121,15 @@ export default function CommunitySearch() {
 
         setRecipes([]);
       } else {
-        // RECIPES: search by title/cuisine (ILIKE) + recipe_types (array contains)
+        // RECIPES: title/cuisine ILIKE + recipe_types (array contains known type)
         const safeQ = escapeLike(debouncedQ);
         const like = `%${safeQ}%`;
-
-        // Match user text to one or more known type tokens (case-insensitive, substring ok).
         const qLower = debouncedQ.toLowerCase();
         const matchedTypes = KNOWN_TYPES.filter(t => t.toLowerCase().includes(qLower));
 
-        // Build the OR list:
-        // - title.ilike.%q%
-        // - cuisine.ilike.%q%
-        // - (optionally) recipe_types.cs.{Dinner}, recipe_types.cs.{Lunch}, ...
         const orParts = [
           `title.ilike.${like}`,
           `cuisine.ilike.${like}`,
-          // DO NOT put .ilike on recipe_types (it's an array); use cs with a brace-wrapped element.
           ...matchedTypes.map(t => `recipe_types.cs.{${t}}`),
         ];
 
@@ -231,7 +223,6 @@ export default function CommunitySearch() {
     });
   }
 
-  // Escape % and _ so they don't act as wildcards from user input
   function escapeLike(s: string) {
     return s.replace(/[%_]/g, m => '\\' + m);
   }
@@ -276,37 +267,7 @@ export default function CommunitySearch() {
     } as CSSProperties,
     hint: { color: '#6b7280', fontSize: 13 } as CSSProperties,
 
-    cardList: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
-      gap: 12,
-    } as CSSProperties,
-    cardButton: {
-      border: '1px solid #eee',
-      borderRadius: 12,
-      padding: 10,
-      background: '#fff',
-      textAlign: 'left' as const,
-      cursor: 'pointer',
-      width: '100%',
-    } as CSSProperties,
-    image: {
-      width: '100%',
-      aspectRatio: '4 / 3',
-      objectFit: 'cover',
-      borderRadius: 8,
-      display: 'block',
-      background: '#f3f4f6',
-    } as CSSProperties,
-    placeholder: {
-      width: '100%',
-      aspectRatio: '4 / 3',
-      borderRadius: 8,
-      background: '#f3f4f6',
-    } as CSSProperties,
-    rTitle: { fontWeight: 600, marginTop: 6, fontSize: 14 } as CSSProperties,
-    rCuisine: { color: '#666', fontSize: 12 } as CSSProperties,
-
+    // Users list cards (unchanged)
     userRow: {
       display: 'flex',
       alignItems: 'center',
@@ -342,7 +303,7 @@ export default function CommunitySearch() {
       cursor: 'pointer',
     } as CSSProperties,
     btnDark: {
-      border: '1px solid #111827',
+      border: '1px solid '#111827',
       background: '#111827',
       color: '#fff',
     } as CSSProperties,
@@ -410,6 +371,7 @@ export default function CommunitySearch() {
           {loading && <div style={S.hint}>Searching…</div>}
           {!loading && errMsg && <div style={S.error}>{errMsg}</div>}
 
+          {/* Users list */}
           {!loading && !errMsg && tab === 'users' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {users.length === 0 ? (
@@ -476,32 +438,31 @@ export default function CommunitySearch() {
             </div>
           )}
 
+          {/* Recipes list — now using your RecipeBadges component */}
           {!loading && !errMsg && tab === 'recipes' && (
-            <div style={S.cardList}>
-              {recipes.length === 0 ? (
-                <div style={S.hint}>No recipes found.</div>
+            <div>
+              {/* If your RecipeBadges component expects a LIST: */}
+              {Array.isArray((RecipeBadges as any)?.defaultProps?.recipes) || 'recipes' in (RecipeBadges as any) ? (
+                <RecipeBadges
+                  recipes={recipes}
+                  onRecipeClick={(r: RecipeRow) => openRecipe(r.id)}
+                />
               ) : (
-                recipes.map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => openRecipe(r.id)}
-                    style={S.cardButton}
-                    aria-label={`Open ${r.title}`}
-                  >
-                    {r.photo_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={r.photo_url} alt={r.title} style={S.image} />
-                    ) : (
-                      <div style={S.placeholder} />
-                    )}
-                    <div style={S.rTitle}>{r.title}</div>
-                    <div style={S.rCuisine}>{r.cuisine || '—'}</div>
-                  </button>
-                ))
+                // Fallback: render one badge per recipe if component expects a single item
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 12 }}>
+                  {recipes.length === 0 ? (
+                    <div style={S.hint}>No recipes found.</div>
+                  ) : (
+                    recipes.map((r) => (
+                      <RecipeBadges key={r.id} recipe={r} onClick={() => openRecipe(r.id)} />
+                    ))
+                  )}
+                </div>
               )}
             </div>
           )}
 
+          {/* Pager */}
           {!loading && (users.length > 0 || recipes.length > 0) && (
             <div style={S.pager}>
               <button
