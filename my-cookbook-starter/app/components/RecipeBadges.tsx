@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import RecipeImage from '@/app/components/RecipeImage';
 
 /** ===============================
  *  Public API: things you can tweak here and pages will update everywhere
@@ -114,27 +115,19 @@ export function RecipeTile({ title, types, photoUrl, onClick, ariaLabel }: Recip
         cursor: 'pointer',
       }}
     >
-      {photoUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={photoUrl}
+      {/* Image or fallback (pot + steam) */}
+      <div style={{ width: '100%', aspectRatio: TILE.aspectRatio }}>
+        <RecipeImage
+          src={photoUrl || null}
           alt={title}
           style={{
             width: '100%',
-            aspectRatio: TILE.aspectRatio,
+            height: '100%',
             objectFit: 'cover',
-            display: 'block',
+            borderRadius: 0, // tiles are square-cropped edges
           }}
         />
-      ) : (
-        <div
-          style={{
-            width: '100%',
-            aspectRatio: TILE.aspectRatio,
-            background: '#f3f4f6',
-          }}
-        />
-      )}
+      </div>
 
       {/* Bottom overlay */}
       <div
