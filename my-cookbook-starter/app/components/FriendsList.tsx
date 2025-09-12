@@ -6,21 +6,22 @@ import { supabase } from '@/lib/supabaseClient';
 
 type Profile = { id: string; display_name: string | null; avatar_url: string | null };
 
-export default function FriendsList() {
+// Accept optional userId: when provided (and not me), we show *that* user's friends via RPC
+export default function FriendsList({ userId }: { userId?: string }) {
   const [me, setMe] = useState<string | null>(null);
 
-  // Incoming requests (people who requested me)
+  // Requests (only relevant when viewing *my* list)
   const [requests, setRequests] = useState<Profile[]>([]);
   const [loadingReq, setLoadingReq] = useState(true);
 
-  // Accepted friendships involving me (ALL accepted, not just mutuals)
+  // Friends shown in the list (either my friends, or other user's friends via RPC)
   const [friends, setFriends] = useState<Profile[]>([]);
   const [loadingFriends, setLoadingFriends] = useState(true);
 
-  // Local state for button logic in Friends section
-  // - acceptedIds: who is currently "accepted" with me
-  // - requestedOut: who I have sent a new pending request to (for "Requested" state)
-  const [acceptedIds, setAcceptedIds] = useState<Set<string>>(new Set());
+  // Relationship state from *my* perspective (used for button logic)
+  // - myAcceptedIds: who is currently "accepted" with *me*
+  // - requestedOut: who *I* have sent a pending request to
+  const [myAcceptedIds, setMyAcceptedIds] = useState<Set<string>>(new Set());
   const [requestedOut, setRequestedOut] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -29,110 +30,164 @@ export default function FriendsList() {
     async function loadAll() {
       // Who am I?
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setMe(null);
-        setRequests([]); setFriends([]);
-        setAcceptedIds(new Set()); setRequestedOut(new Set());
-        setLoadingReq(false); setLoadingFriends(false);
-        return;
-      }
-      setMe(user.id);
+      const meId = user?.id ?? null;
+      if (ignore) return;
+      setMe(meId);
 
-      // ---------- Incoming Requests (status=pending where addressee_id = me) ----------
-      setLoadingReq(true);
-      const { data: reqRows, error: reqErr } = await supabase
-        .from('friendships')
-        .select('requester_id')
-        .eq('addressee_id', user.id)
-        .eq('status', 'pending');
-
-      if (reqErr) {
-        console.error(reqErr);
-        if (!ignore) { setRequests([]); setLoadingReq(false); }
+      // Always compute my outgoing pending so we can show "Requested" state
+      if (meId) {
+        const { data: outPendRows } = await supabase
+          .from('friendships')
+          .select('addressee_id')
+          .eq('requester_id', meId)
+          .eq('status', 'pending');
+        if (ignore) return;
+        setRequestedOut(new Set((outPendRows ?? []).map(r => r.addressee_id as string)));
       } else {
-        const requesterIds: string[] = (reqRows ?? []).map(r => r.requester_id as string);
-        if (requesterIds.length === 0) {
-          if (!ignore) { setRequests([]); setLoadingReq(false); }
-        } else {
-          const { data: reqProfiles, error: rpErr } = await supabase
-            .from('profiles')
-            .select('id, display_name, avatar_url')
-            .in('id', requesterIds);
-          if (rpErr) {
-            console.error(rpErr);
-            if (!ignore) { setRequests([]); }
+        setRequestedOut(new Set());
+      }
+
+      // Always compute my accepted set so we can show "Friend" vs "Add Friend"
+      if (meId) {
+        const { data: accRows, error: accErr } = await supabase
+          .from('friendships')
+          .select('requester_id, addressee_id')
+          .eq('status', 'accepted')
+          .or(`requester_id.eq.${meId},addressee_id.eq.${meId}`);
+        if (!ignore) {
+          if (accErr) {
+            console.error(accErr);
+            setMyAcceptedIds(new Set());
           } else {
-            const sorted = [...(reqProfiles ?? [])].sort((a: Profile, b: Profile) => {
-              const an = (a.display_name ?? '').toLowerCase();
-              const bn = (b.display_name ?? '').toLowerCase();
-              if (an < bn) return -1;
-              if (an > bn) return 1;
-              return a.id < b.id ? -1 : 1;
+            const otherIds = (accRows ?? []).map(r => {
+              const req = r.requester_id as string;
+              const add = r.addressee_id as string;
+              return req === meId ? add : req;
             });
-            if (!ignore) setRequests(sorted);
+            setMyAcceptedIds(new Set(otherIds));
           }
-          if (!ignore) setLoadingReq(false);
         }
+      } else {
+        setMyAcceptedIds(new Set());
       }
 
-      // ---------- Outgoing pending requests (for "Requested" state on friends rows) ----------
-      const { data: outPendRows, error: outPendErr } = await supabase
-        .from('friendships')
-        .select('addressee_id')
-        .eq('requester_id', user.id)
-        .eq('status', 'pending');
-      if (outPendErr) {
-        console.error(outPendErr);
-        if (!ignore) setRequestedOut(new Set());
-      } else {
-        const outSet = new Set<string>((outPendRows ?? []).map(r => r.addressee_id as string));
-        if (!ignore) setRequestedOut(outSet);
-      }
+      // If viewing SOMEONE ELSE’S list → fetch via RPC (bypasses RLS safely)
+      if (userId && meId !== userId) {
+        // Hide requests area in this mode
+        setRequests([]);
+        setLoadingReq(false);
 
-      // ---------- Friends (ALL accepted involving me) ----------
-      setLoadingFriends(true);
-      const { data: accRows, error: accErr } = await supabase
-        .from('friendships')
-        .select('requester_id, addressee_id')
-        .eq('status', 'accepted')
-        .or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`);
+        setLoadingFriends(true);
+        const { data: list, error: fErr } = await supabase.rpc('friends_of_user', { target_user: userId });
+        if (ignore) return;
 
-      if (accErr) {
-        console.error(accErr);
-        if (!ignore) { setFriends([]); setAcceptedIds(new Set()); setLoadingFriends(false); }
-      } else {
-        const otherIds = (accRows ?? []).map(r => {
-          const req = r.requester_id as string;
-          const add = r.addressee_id as string;
-          return req === user.id ? add : req;
-        });
-
-        const uniqueOtherIds = Array.from(new Set(otherIds));
-        const acceptedSet = new Set<string>(uniqueOtherIds);
-
-        if (uniqueOtherIds.length === 0) {
-          if (!ignore) {
-            setFriends([]); setAcceptedIds(acceptedSet); setLoadingFriends(false);
-          }
+        if (fErr) {
+          console.error(fErr);
+          setFriends([]);
         } else {
-          const { data: fProfiles, error: fpErr } = await supabase
-            .from('profiles')
-            .select('id, display_name, avatar_url')
-            .in('id', uniqueOtherIds);
-          if (fpErr) {
-            console.error(fpErr);
-            if (!ignore) { setFriends([]); setAcceptedIds(acceptedSet); setLoadingFriends(false); }
+          const sorted = ((list ?? []) as Profile[]).slice().sort((a, b) => {
+            const an = (a.display_name ?? '').toLowerCase();
+            const bn = (b.display_name ?? '').toLowerCase();
+            if (an < bn) return -1;
+            if (an > bn) return 1;
+            return a.id < b.id ? -1 : 1;
+          });
+          setFriends(sorted);
+        }
+        setLoadingFriends(false);
+        return; // done for other-user mode
+      }
+
+      // ====== MY OWN LIST MODE (no userId, or userId === me) ======
+
+      // Incoming requests (pending where addressee = me)
+      if (!meId) {
+        setRequests([]);
+        setLoadingReq(false);
+      } else {
+        setLoadingReq(true);
+        const { data: reqRows, error: reqErr } = await supabase
+          .from('friendships')
+          .select('requester_id')
+          .eq('addressee_id', meId)
+          .eq('status', 'pending');
+        if (ignore) return;
+
+        if (reqErr) {
+          console.error(reqErr);
+          setRequests([]);
+        } else {
+          const requesterIds: string[] = (reqRows ?? []).map(r => r.requester_id as string);
+          if (requesterIds.length === 0) {
+            setRequests([]);
           } else {
-            const sorted = [...(fProfiles ?? [])].sort((a: Profile, b: Profile) => {
-              const an = (a.display_name ?? '').toLowerCase();
-              const bn = (b.display_name ?? '').toLowerCase();
-              if (an < bn) return -1;
-              if (an > bn) return 1;
-              return a.id < b.id ? -1 : 1;
-            });
-            if (!ignore) {
-              setFriends(sorted);
-              setAcceptedIds(acceptedSet);
+            const { data: reqProfiles, error: rpErr } = await supabase
+              .from('profiles')
+              .select('id, display_name, avatar_url')
+              .in('id', requesterIds);
+            if (rpErr) {
+              console.error(rpErr);
+              setRequests([]);
+            } else {
+              const sorted = [...(reqProfiles ?? [])].sort((a: Profile, b: Profile) => {
+                const an = (a.display_name ?? '').toLowerCase();
+                const bn = (b.display_name ?? '').toLowerCase();
+                if (an < bn) return -1;
+                if (an > bn) return 1;
+                return a.id < b.id ? -1 : 1;
+              });
+              setRequests(sorted);
+            }
+          }
+        }
+        setLoadingReq(false);
+      }
+
+      // Friends (ALL accepted involving me)
+      setLoadingFriends(true);
+      if (!meId) {
+        setFriends([]);
+        setLoadingFriends(false);
+      } else {
+        const { data: accRows2, error: accErr2 } = await supabase
+          .from('friendships')
+          .select('requester_id, addressee_id')
+          .eq('status', 'accepted')
+          .or(`requester_id.eq.${meId},addressee_id.eq.${meId}`);
+
+        if (accErr2) {
+          console.error(accErr2);
+          setFriends([]);
+          setLoadingFriends(false);
+        } else {
+          const otherIds = (accRows2 ?? []).map(r => {
+            const req = r.requester_id as string;
+            const add = r.addressee_id as string;
+            return req === meId ? add : req;
+          });
+
+          const unique = Array.from(new Set(otherIds));
+          if (unique.length === 0) {
+            setFriends([]);
+            setLoadingFriends(false);
+          } else {
+            const { data: fProfiles, error: fpErr } = await supabase
+              .from('profiles')
+              .select('id, display_name, avatar_url')
+              .in('id', unique);
+            if (fpErr) {
+              console.error(fpErr);
+              setFriends([]);
+              setLoadingFriends(false);
+            } else {
+              const sorted = [...(fProfiles ?? [])].sort((a: Profile, b: Profile) => {
+                const an = (a.display_name ?? '').toLowerCase();
+                const bn = (b.display_name ?? '').toLowerCase();
+                if (an < bn) return -1;
+                if (an > bn) return 1;
+                return a.id < b.id ? -1 : 1;
+              });
+              setFriends(sorted as Profile[]);
               setLoadingFriends(false);
             }
           }
@@ -142,27 +197,19 @@ export default function FriendsList() {
 
     loadAll();
     return () => { ignore = true; };
-  }, []);
+  }, [userId]);
 
-  // ----- Actions for Requests -----
+  // ----- Actions for Requests (only for my own list) -----
   async function acceptRequest(requesterId: string) {
     if (!me) return;
-
     const { error } = await supabase
       .from('friendships')
       .update({ status: 'accepted', updated_at: new Date().toISOString() })
       .match({ requester_id: requesterId, addressee_id: me, status: 'pending' });
+    if (error) { console.error(error); alert('Could not accept request.'); return; }
 
-    if (error) {
-      console.error(error);
-      alert('Could not accept request.');
-      return;
-    }
-
-    // Move from Requests -> Friends (UI)
     setRequests(prev => prev.filter(p => p.id !== requesterId));
-    // add to acceptedIds and maybe to friends list (if not present)
-    setAcceptedIds(prev => new Set(prev).add(requesterId));
+    setMyAcceptedIds(prev => new Set(prev).add(requesterId));
     const exists = friends.some(f => f.id === requesterId);
     if (!exists) {
       const { data: pf } = await supabase
@@ -180,7 +227,6 @@ export default function FriendsList() {
         }));
       }
     }
-    // If I had previously requested them, clear "Requested" state
     setRequestedOut(prev => {
       const next = new Set(prev);
       next.delete(requesterId);
@@ -194,16 +240,11 @@ export default function FriendsList() {
       .from('friendships')
       .delete()
       .match({ requester_id: requesterId, addressee_id: me, status: 'pending' });
-
-    if (error) {
-      console.error(error);
-      alert('Could not decline request.');
-      return;
-    }
+    if (error) { console.error(error); alert('Could not decline request.'); return; }
     setRequests(prev => prev.filter(p => p.id !== requesterId));
   }
 
-  // ----- Actions for Friends -----
+  // ----- Actions for Friends (from *my* perspective) -----
   async function unfriend(otherId: string) {
     if (!me) return;
     const ok = window.confirm('Remove this friend?');
@@ -213,20 +254,13 @@ export default function FriendsList() {
       .from('friendships')
       .delete()
       .or(`and(requester_id.eq.${me},addressee_id.eq.${otherId},status.eq.accepted),and(requester_id.eq.${otherId},addressee_id.eq.${me},status.eq.accepted)`);
+    if (error) { console.error(error); alert('Could not remove friend.'); return; }
 
-    if (error) {
-      console.error(error);
-      alert('Could not remove friend.');
-      return;
-    }
-
-    // Keep row visible until modal closes; flip to "Add Friend"
-    setAcceptedIds(prev => {
+    setMyAcceptedIds(prev => {
       const next = new Set(prev);
       next.delete(otherId);
       return next;
     });
-    // also clear any "Requested" local flag (fresh state)
     setRequestedOut(prev => {
       const next = new Set(prev);
       next.delete(otherId);
@@ -236,7 +270,6 @@ export default function FriendsList() {
 
   async function addFriend(otherId: string) {
     if (!me) return;
-    // Create a NEW pending request from me -> other
     const { error } = await supabase
       .from('friendships')
       .insert({
@@ -246,13 +279,7 @@ export default function FriendsList() {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
-
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    // Reflect "Requested" state locally
+    if (error) { console.error(error); return; }
     setRequestedOut(prev => new Set(prev).add(otherId));
   }
 
@@ -286,7 +313,7 @@ export default function FriendsList() {
     const listWrap: React.CSSProperties = {
       maxHeight: '65vh',
       overflowY: 'auto',
-      overflowX: 'hidden',   // stop sideways scroll
+      overflowX: 'hidden',
       margin: 0,
       padding: 0,
       listStyle: 'none',
@@ -297,36 +324,38 @@ export default function FriendsList() {
     const rowStyle: React.CSSProperties = {
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'space-between',  // keeps name left, button right
+      justifyContent: 'space-between',
       width: '100%',
-      maxWidth: '100%',                  // never wider than modal
+      maxWidth: '100%',
       borderBottom: '1px solid #eee',
       padding: '12px 8px',
       background: '#fff',
       boxSizing: 'border-box',
     };
 
-    const linkStyle: React.CSSProperties = { 
-      display: 'flex', 
-      alignItems: 'center', 
-      gap: 12, 
-      textDecoration: 'none', 
+    const linkStyle: React.CSSProperties = {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 12,
+      textDecoration: 'none',
       color: 'inherit',
       flex: 1,
       minWidth: 0,
     };
 
-    const nameStyle: React.CSSProperties = { 
-      fontWeight: 600, 
-      overflow: 'hidden', 
+    const nameStyle: React.CSSProperties = {
+      fontWeight: 600,
+      overflow: 'hidden',
       textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap', 
+      whiteSpace: 'nowrap',
     };
+
+    const viewingOthers = !!(userId && me && userId !== me);
 
     return (
       <div>
-        {/* ===== Requests section ===== */}
-        {loadingReq ? (
+        {/* ===== Requests section (hide when viewing someone else's list) ===== */}
+        {viewingOthers ? null : loadingReq ? (
           <p>Loading requests…</p>
         ) : requests.length > 0 ? (
           <div style={{ marginBottom: 12 }}>
@@ -361,7 +390,7 @@ export default function FriendsList() {
           </div>
         ) : null}
 
-        {/* ===== Friends section (ALL accepted rows involving me) ===== */}
+        {/* ===== Friends section (list may be mine or the viewed user's) ===== */}
         {loadingFriends ? (
           <p>Loading friends…</p>
         ) : friends.length === 0 ? (
@@ -371,8 +400,9 @@ export default function FriendsList() {
             <div style={{ fontWeight: 700, margin: '0 0 8px 2px' }}>Friends</div>
             <ul style={listWrap}>
               {friends.map((f) => {
-                const isAccepted = acceptedIds.has(f.id);
-                const isRequestedOut = requestedOut.has(f.id);
+                const isSelf = me != null && f.id === me;
+                const amFriends = myAcceptedIds.has(f.id);          // my relationship with them
+                const iRequested = requestedOut.has(f.id);           // I sent a pending request
 
                 const handle = f.display_name ? encodeURIComponent(f.display_name) : f.id;
                 const href = `/u/${handle}`;
@@ -384,18 +414,20 @@ export default function FriendsList() {
                     onMouseEnter={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(-1px)'; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(0)'; }}
                   >
-                    {/* Left: open their public My Cookbook */}
+                    {/* Left: open their My Cookbook */}
                     <Link href={href} style={linkStyle}>
                       <img
                         src={f.avatar_url || '/avatar-placeholder.png'}
                         alt=""
                         style={{ height: 40, width: 40, borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }}
                       />
-                      <div style={nameStyle}>{f.display_name || f.id}</div>
+                      <div style={nameStyle}>{isSelf ? 'You' : (f.display_name || f.id)}</div>
                     </Link>
 
-                    {/* Right: status button (prevent link navigation) */}
-                    {isAccepted ? (
+                    {/* Right: status button (no button when it's me) */}
+                    {isSelf || !me ? (
+                      <div />  {/* no action for self or when not logged in */}
+                    ) : amFriends ? (
                       <button
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); unfriend(f.id); }}
                         style={btnGreen}
@@ -404,7 +436,7 @@ export default function FriendsList() {
                       >
                         Friend
                       </button>
-                    ) : isRequestedOut ? (
+                    ) : iRequested ? (
                       <button
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
                         style={btnDarkGray}
@@ -432,7 +464,7 @@ export default function FriendsList() {
         )}
       </div>
     );
-  }, [requests, loadingReq, friends, loadingFriends, acceptedIds, requestedOut]);
+  }, [userId, me, requests, loadingReq, friends, loadingFriends, myAcceptedIds, requestedOut]);
 
   return content;
 }
