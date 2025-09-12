@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -24,7 +24,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!cancelled) setMe(user?.id ?? null);
 
-      // ===== Fetch the viewed user's accepted friends via RPC (bypasses RLS safely) =====
+      // ===== Fetch the viewed user's accepted friends via RPC =====
       setLoading(true);
       const { data: list, error: rpcErr } = await supabase.rpc('friends_of_user', { target_user: userId });
       if (rpcErr) {
@@ -39,7 +39,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
         return;
       }
 
-      const sorted = ((list ?? []) as Profile[]).slice().sort((a, b) => {
+      const sorted: Profile[] = (list ?? []).slice().sort((a: any, b: any) => {
         const an = (a.display_name ?? '').toLowerCase();
         const bn = (b.display_name ?? '').toLowerCase();
         if (an < bn) return -1;
@@ -48,7 +48,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
       });
       if (!cancelled) setFriends(sorted);
 
-      // If not signed in, stop here (no relationship buttons)
+      // If not signed in, stop here
       if (!user?.id) {
         if (!cancelled) {
           setAcceptedWithMe(new Set());
@@ -59,7 +59,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
         return;
       }
 
-      // ===== Compute my relationships with these users (RLS allows this because it involves me) =====
+      // ===== Compute my relationships with these users =====
       const friendIds = sorted.map(p => p.id);
       if (friendIds.length === 0) {
         if (!cancelled) {
@@ -77,10 +77,9 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
         .select('addressee_id')
         .eq('requester_id', user.id)
         .eq('status', 'pending');
-
       const outSet = new Set<string>((outPendRows ?? []).map(r => String(r.addressee_id)));
 
-      // All relations where *I* am involved and the other side is one of friendIds
+      // All relations where I am involved and the other side is in friendIds
       const { data: relRows, error: relErr } = await supabase
         .from('friendships')
         .select('requester_id, addressee_id, status')
@@ -104,7 +103,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
       const accSet = new Set<string>();
       const inSet = new Set<string>();
 
-      (relRows ?? []).forEach((row) => {
+      (relRows ?? []).forEach((row: any) => {
         const req = String(row.requester_id);
         const add = String(row.addressee_id);
         const st  = String(row.status);
@@ -285,9 +284,9 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
           {friends.map((f) => {
             const handle = f.display_name ? encodeURIComponent(f.display_name) : f.id;
             const href = `/u/${handle}`;
-            const isAccepted = acceptedWithMe.has(f.id); // my relation to them
-            const isRequestedOut = requestedOut.has(f.id); // I sent pending to them
-            const isIncoming = incomingToMe.has(f.id); // they sent pending to me
+            const isAccepted = acceptedWithMe.has(f.id);
+            const isRequestedOut = requestedOut.has(f.id);
+            const isIncoming = incomingToMe.has(f.id);
             const isSelf = me != null && f.id === me;
 
             return (
@@ -306,7 +305,6 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
                   <div style={nameStyle}>{isSelf ? 'You' : (f.display_name || f.id)}</div>
                 </Link>
 
-                {/* Right: action based on my relationship to them */}
                 {isSelf ? (
                   <div />  {/* no button for yourself */}
                 ) : !me ? (
