@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
-import { RecipeTile } from '../components/RecipeBadges';
-import RecipeModal from '../components/RecipeModal';
+import { RecipeTile } from '../../components/RecipeBadges';
+import RecipeModal from '../../components/RecipeModal';
 
 type Profile = {
   id: string;
