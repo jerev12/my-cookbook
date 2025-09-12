@@ -1,6 +1,7 @@
 'use client';
 import React from 'react';
 
+
 type Props = {
   /** Public image URL. If null/empty, we show the pot-with-steam placeholder. */
   src: string | null | undefined;
