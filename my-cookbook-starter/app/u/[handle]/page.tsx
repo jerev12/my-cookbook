@@ -30,8 +30,8 @@ type Recipe = {
   user_id: string;
   title: string;
   cuisine: string | null;
-  recipe_types: string[] | null;
-  photo_url: string | null;
+  recipe_types: string[] | null;   // ✅ present so we can pass to RecipeTile.types
+  photo_url: string | null;        // ✅ maps to RecipeTile.photoUrl
   source_url: string | null;
   created_at: string | null;
   visibility?: 'public' | 'friends' | 'private' | null;
@@ -69,9 +69,7 @@ export default function OtherUserCookbookByHandlePage() {
       if (!on) return;
       setCurrentUserId(data.user?.id ?? null);
     })();
-    return () => {
-      on = false;
-    };
+    return () => { on = false; };
   }, []);
 
   // load profile by handle
@@ -97,9 +95,7 @@ export default function OtherUserCookbookByHandlePage() {
       }
       setViewedProfile(data as Profile);
     })();
-    return () => {
-      on = false;
-    };
+    return () => { on = false; };
   }, [handle, router]);
 
   const viewedUserId = viewedProfile?.id ?? null;
@@ -144,9 +140,7 @@ export default function OtherUserCookbookByHandlePage() {
       }
     })();
 
-    return () => {
-      on = false;
-    };
+    return () => { on = false; };
   }, [currentUserId, viewedUserId, isSelf]);
 
   // counts
@@ -180,9 +174,7 @@ export default function OtherUserCookbookByHandlePage() {
       }
     })();
 
-    return () => {
-      on = false;
-    };
+    return () => { on = false; };
   }, [viewedUserId]);
 
   // friends list (accepted)
@@ -228,9 +220,7 @@ export default function OtherUserCookbookByHandlePage() {
       }
     })();
 
-    return () => {
-      on = false;
-    };
+    return () => { on = false; };
   }, [viewedUserId]);
 
   // recipes visible to me
@@ -346,6 +336,12 @@ export default function OtherUserCookbookByHandlePage() {
   const handleClickRecipesCooked = useCallback(() => {
     router.push(`/users/${viewedUserId}/cooked`);
   }, [router, viewedUserId]);
+
+  // ✅ Find the full recipe object for the modal
+  const selectedRecipe: Recipe | null = useMemo(
+    () => (openRecipeId ? recipes.find((r) => r.id === openRecipeId) ?? null : null),
+    [openRecipeId, recipes]
+  );
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6">
@@ -481,8 +477,8 @@ export default function OtherUserCookbookByHandlePage() {
             <RecipeTile
               key={r.id}
               title={r.title}
-              /* image prop intentionally omitted until we confirm the correct name */
-              aspect="1/1"
+              types={r.recipe_types || undefined}
+              photoUrl={r.photo_url || undefined}
               onClick={() => setOpenRecipeId(r.id)}
             />
           ))}
@@ -503,9 +499,11 @@ export default function OtherUserCookbookByHandlePage() {
       </div>
 
       {/* Modal */}
-      {openRecipeId ? (
-        <RecipeModal recipeId={openRecipeId} onClose={() => setOpenRecipeId(null)} />
-      ) : null}
+      <RecipeModal
+        open={!!openRecipeId}
+        onClose={() => setOpenRecipeId(null)}
+        recipe={selectedRecipe}
+      />
     </div>
   );
 }
