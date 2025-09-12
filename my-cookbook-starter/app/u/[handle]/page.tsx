@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
+
+// NOTE: adjust these imports if your alias/paths differ.
+// From app/u/[handle]/ to app/components
 import { RecipeTile } from '../../components/RecipeBadges';
 import RecipeModal from '../../components/RecipeModal';
 
@@ -13,6 +16,13 @@ type Profile = {
   display_name: string | null;
   nickname: string | null;
   bio: string | null;
+  avatar_url: string | null;
+};
+
+type FriendPreview = {
+  id: string;
+  display_name: string | null;
+  nickname: string | null;
   avatar_url: string | null;
 };
 
@@ -38,7 +48,7 @@ export default function OtherUserCookbookByHandlePage() {
   const [viewedProfile, setViewedProfile] = useState<Profile | null>(null);
 
   const [friendshipStatus, setFriendshipStatus] = useState<FriendshipStatus>('none');
-  const [pendingRequesterId, setPendingRequesterId] = useState<string | null>(null); // who initiated pending
+  const [pendingRequesterId, setPendingRequesterId] = useState<string | null>(null);
 
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [recipesLoading, setRecipesLoading] = useState<boolean>(true);
@@ -47,12 +57,12 @@ export default function OtherUserCookbookByHandlePage() {
 
   const [recipesAddedCount, setRecipesAddedCount] = useState<number>(0);
   const [recipesCookedCount, setRecipesCookedCount] = useState<number>(0);
-  const [friendsOfViewedUser, setFriendsOfViewedUser] = useState<Profile[]>([]);
+  const [friendsOfViewedUser, setFriendsOfViewedUser] = useState<FriendPreview[]>([]);
   const [openRecipeId, setOpenRecipeId] = useState<string | null>(null);
 
   const PAGE_SIZE = 24;
 
-  // --- bootstrap current user ---
+  // current user
   useEffect(() => {
     let on = true;
     (async () => {
@@ -60,10 +70,12 @@ export default function OtherUserCookbookByHandlePage() {
       if (!on) return;
       setCurrentUserId(data.user?.id ?? null);
     })();
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, []);
 
-  // --- load viewed profile by handle ---
+  // load profile by handle
   useEffect(() => {
     if (!handle) return;
     let on = true;
@@ -71,7 +83,7 @@ export default function OtherUserCookbookByHandlePage() {
       const { data, error } = await supabase
         .from('profiles')
         .select('id, handle, display_name, nickname, bio, avatar_url')
-        .ilike('handle', String(handle)) // case-insensitive; switch to .eq if you enforce lowercasing
+        .ilike('handle', String(handle)) // use .eq if you normalize to lowercase
         .maybeSingle();
 
       if (!on) return;
@@ -86,13 +98,15 @@ export default function OtherUserCookbookByHandlePage() {
       }
       setViewedProfile(data as Profile);
     })();
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, [handle, router]);
 
   const viewedUserId = viewedProfile?.id ?? null;
   const isSelf = currentUserId && viewedUserId && currentUserId === viewedUserId;
 
-  // --- friendship status between current user and viewed user ---
+  // friendship status
   useEffect(() => {
     if (!currentUserId || !viewedUserId || isSelf) {
       if (isSelf) {
@@ -131,10 +145,12 @@ export default function OtherUserCookbookByHandlePage() {
       }
     })();
 
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, [currentUserId, viewedUserId, isSelf]);
 
-  // --- counts (all recipes; cooked optional) ---
+  // counts
   useEffect(() => {
     if (!viewedUserId) return;
     let on = true;
@@ -165,10 +181,12 @@ export default function OtherUserCookbookByHandlePage() {
       }
     })();
 
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, [viewedUserId]);
 
-  // --- friends list for the viewed user (accepted only) ---
+  // friends list (accepted)
   useEffect(() => {
     if (!viewedUserId) return;
     let on = true;
@@ -188,9 +206,11 @@ export default function OtherUserCookbookByHandlePage() {
         return;
       }
 
-      const otherIds = (frows ?? []).map((r) =>
-        r.requester_id === viewedUserId ? r.addressee_id : r.requester_id
-      );
+      const otherIds =
+        (frows ?? []).map((r) =>
+          r.requester_id === viewedUserId ? r.addressee_id : r.requester_id
+        ) ?? [];
+
       if (otherIds.length === 0) {
         setFriendsOfViewedUser([]);
         return;
@@ -199,28 +219,29 @@ export default function OtherUserCookbookByHandlePage() {
       const { data: profs, error: perr } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url')
-        .in('id', otherIds.slice(0, 50));
+        .in('id', otherIds.slice(0, 50)); // preview only
 
       if (perr) {
         console.error('Friend profiles fetch error', perr);
         setFriendsOfViewedUser([]);
       } else {
-        setFriendsOfViewedUser(profs ?? []);
+        setFriendsOfViewedUser((profs as FriendPreview[]) ?? []);
       }
     })();
 
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, [viewedUserId]);
 
-  // --- visibility & recipes list (only what *I* can see) ---
-  const isFriends = isSelf || friendshipStatus === 'accepted';
+  // recipes visible to me
+  const isFriends = !!isSelf || friendshipStatus === 'accepted';
 
   const loadRecipes = useCallback(
     async (initial = false) => {
       if (!viewedUserId) return;
       setRecipesLoading(true);
 
-      // Base query: recipes by viewed user
       let query = supabase
         .from('recipes')
         .select(
@@ -230,14 +251,12 @@ export default function OtherUserCookbookByHandlePage() {
         .eq('user_id', viewedUserId)
         .order('created_at', { ascending: false });
 
-      // Apply visibility filter
       if (isFriends) {
         query = query.or('visibility.eq.public,visibility.eq.friends');
       } else {
         query = query.eq('visibility', 'public');
       }
 
-      // Simple cursor
       if (!initial && pageCursor) {
         query = query.lt('created_at', pageCursor);
       }
@@ -250,7 +269,7 @@ export default function OtherUserCookbookByHandlePage() {
         return;
       }
 
-      const rows = data ?? [];
+      const rows = (data as Recipe[]) ?? [];
       setRecipes((prev) => (initial ? rows : [...prev, ...rows]));
       if (rows.length < PAGE_SIZE) {
         setHasMore(false);
@@ -263,7 +282,6 @@ export default function OtherUserCookbookByHandlePage() {
     [PAGE_SIZE, isFriends, pageCursor, viewedUserId]
   );
 
-  // Reset & initial load when profile or friendship changes
   useEffect(() => {
     setRecipes([]);
     setPageCursor(null);
@@ -273,7 +291,7 @@ export default function OtherUserCookbookByHandlePage() {
     }
   }, [viewedUserId, isFriends, loadRecipes]);
 
-  // --- inline friend button actions ---
+  // inline friend button actions
   const canCancelPending =
     friendshipStatus === 'pending' && pendingRequesterId === currentUserId;
 
@@ -299,7 +317,11 @@ export default function OtherUserCookbookByHandlePage() {
     const { error } = await supabase
       .from('friendships')
       .delete()
-      .match({ requester_id: currentUserId, addressee_id: viewedUserId, status: 'pending' });
+      .match({
+        requester_id: currentUserId,
+        addressee_id: viewedUserId,
+        status: 'pending',
+      });
     if (error) {
       console.error('Cancel request error', error);
       return;
@@ -313,9 +335,9 @@ export default function OtherUserCookbookByHandlePage() {
     return viewedProfile.display_name || viewedProfile.nickname || `@${viewedProfile.handle}`;
   }, [viewedProfile]);
 
-  // --- stat tile handlers ---
   const handleClickFriends = useCallback(() => {
-    router.push(`/users/${viewedUserId}/friends`); // adjust if you have a handle-based friends route instead
+    // adjust this route if you’ll use handle-based subroutes
+    router.push(`/users/${viewedUserId}/friends`);
   }, [router, viewedUserId]);
 
   const handleClickRecipesAdded = useCallback(() => {
@@ -351,7 +373,7 @@ export default function OtherUserCookbookByHandlePage() {
               <p className="text-sm text-gray-600">@{viewedProfile?.handle}</p>
             </div>
 
-            {/* Inline Friend Button (replaces Edit Profile) */}
+            {/* Inline Friend Button */}
             {viewedUserId && !isSelf ? (
               friendshipStatus === 'none' ? (
                 <button
@@ -403,7 +425,7 @@ export default function OtherUserCookbookByHandlePage() {
         </div>
       </div>
 
-      {/* Stats row: Friends | Recipes Added | Recipes Cooked */}
+      {/* Stats row */}
       <div className="mt-6 grid grid-cols-3 gap-3">
         <button
           onClick={handleClickFriends}
