@@ -480,9 +480,8 @@ export default function OtherUserCookbookByHandlePage() {
           {recipes.map((r) => (
             <RecipeTile
               key={r.id}
-              /* id prop removed per Option 1 */
               title={r.title}
-              imgUrl={r.photo_url || undefined}
+              /* image prop intentionally omitted until we confirm the correct name */
               aspect="1/1"
               onClick={() => setOpenRecipeId(r.id)}
             />
