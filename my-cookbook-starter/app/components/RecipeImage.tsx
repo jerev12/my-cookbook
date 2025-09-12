@@ -1,25 +1,15 @@
 'use client';
 import React from 'react';
 
-
 type Props = {
-  /** Public image URL. If null/empty, we show the pot-with-steam placeholder. */
   src: string | null | undefined;
   alt: string;
   className?: string;
   style?: React.CSSProperties;
-  /** Optional: round the corners of the rendered image/placeholder. */
   radius?: number;
-  /** Optional: objectFit for the real image (default 'cover') */
   objectFit?: React.CSSProperties['objectFit'];
 };
 
-/**
- * RecipeImage
- * - Renders the recipe photo when `src` is provided
- * - Otherwise renders a friendly pot-with-steam placeholder
- * - Designed to fill whatever container size/aspect you give it
- */
 export default function RecipeImage({
   src,
   alt,
@@ -29,7 +19,6 @@ export default function RecipeImage({
   objectFit = 'cover',
 }: Props) {
   if (src) {
-    // Real image
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -48,7 +37,7 @@ export default function RecipeImage({
     );
   }
 
-  // Placeholder (pot + cloud-like steam)
+  // Placeholder: pot with upward steam, scaled larger
   return (
     <div
       className={className}
@@ -58,69 +47,60 @@ export default function RecipeImage({
         placeItems: 'center',
         width: '100%',
         height: '100%',
-        background: '#f3f4f6',       // light gray background
+        background: '#f3f4f6',
         borderRadius: radius,
         ...style,
       }}
     >
       <svg
-        viewBox="0 0 160 160"
-        width="64"
-        height="64"
+        viewBox="0 0 120 120"
+        width="72"
+        height="72"
         role="img"
-        aria-label=""
+        aria-label="Cooking pot"
       >
-        {/* subtle backdrop circle to feel centered */}
-        <circle cx="80" cy="80" r="58" fill="#f8fafc" />
+        {/* Steam wisps (simpler curves, rising straight up) */}
+        <path
+          d="M60 20c-4 6-4 12 0 18M72 20c-4 6-4 12 0 18M48 20c-4 6-4 12 0 18"
+          stroke="#9ca3af"
+          strokeWidth="3"
+          strokeLinecap="round"
+          fill="none"
+        />
 
-        {/* === STEAM (puffy cloud style) === */}
-        {/* A small cluster of overlapping circles that sits just above the lid, 
-            with a tiny connector so it looks like it’s coming out of the pot. */}
-        <g transform="translate(0, 4)">
-          {/* cloud cluster */}
-          <g fill="#e5e7eb" stroke="#d1d5db" strokeWidth="1">
-            <circle cx="78" cy="56" r="10" />
-            <circle cx="90" cy="60" r="8" />
-            <circle cx="66" cy="61" r="8" />
-            <circle cx="80" cy="64" r="9" />
-          </g>
-          {/* little connector plume that meets the lid */}
-          <path
-            d="M78 72c3 0 6-1 8-3 0 0-2 6-8 6s-8-6-8-6c2 2 5 3 8 3z"
-            fill="#e5e7eb"
-            stroke="#d1d5db"
-            strokeWidth="1"
-          />
-        </g>
+        {/* Pot lid */}
+        <rect
+          x="30"
+          y="50"
+          width="60"
+          height="8"
+          rx="4"
+          fill="#cbd5e1"
+        />
+        <rect
+          x="55"
+          y="44"
+          width="10"
+          height="6"
+          rx="3"
+          fill="#94a3b8"
+        />
 
-        {/* === LID === */}
-        <g>
-          {/* knob */}
-          <rect x="76" y="74" width="8" height="6" rx="3" fill="#cbd5e1" />
-          {/* lid bar */}
-          <rect x="48" y="80" width="64" height="8" rx="4" fill="#cbd5e1" />
-        </g>
+        {/* Pot body */}
+        <rect
+          x="28"
+          y="58"
+          width="64"
+          height="36"
+          rx="6"
+          fill="#d1d5db"
+          stroke="#9ca3af"
+          strokeWidth="2"
+        />
 
-        {/* === POT BODY === */}
-        <g>
-          {/* left handle */}
-          <rect x="36" y="92" width="12" height="10" rx="5" fill="#d1d5db" />
-          {/* right handle */}
-          <rect x="112" y="92" width="12" height="10" rx="5" fill="#d1d5db" />
-          {/* body */}
-          <rect
-            x="46"
-            y="88"
-            width="68"
-            height="40"
-            rx="8"
-            fill="#d1d5db"
-            stroke="#cbd5e1"
-            strokeWidth="1"
-          />
-          {/* lip highlight */}
-          <rect x="48" y="88" width="64" height="3" rx="1.5" fill="#e5e7eb" />
-        </g>
+        {/* Handles */}
+        <rect x="18" y="64" width="10" height="12" rx="4" fill="#9ca3af" />
+        <rect x="92" y="64" width="10" height="12" rx="4" fill="#9ca3af" />
       </svg>
     </div>
   );
