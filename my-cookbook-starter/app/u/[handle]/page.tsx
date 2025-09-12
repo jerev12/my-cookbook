@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '@/app/components/RecipeModal';
 import FriendsListModal from '@/app/components/FriendsListModal';
@@ -29,10 +28,13 @@ type Profile = {
   bio?: string | null;
 };
 
+// 👇 Set this to match the avatar size used by ProfileSection on "My Cookbook".
+const AVATAR_SIZE = 64; // ← If your My Cookbook avatar is 56 or 72, change this one number.
+
 export default function OtherCookbookPage({ params }: { params: { handle: string } }) {
   const handleParam = decodeURIComponent(params.handle || '').trim();
 
-  // Viewer + Viewed user
+  // Viewer + viewed user
   const [viewerId, setViewerId] = useState<string | null>(null);
   const [viewed, setViewed] = useState<Profile | null>(null);
   const [loadingViewed, setLoadingViewed] = useState(true);
@@ -49,8 +51,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   const [totalAddedCount, setTotalAddedCount] = useState(0);
   const [recipesCookedCount] = useState(0); // placeholder
 
-  // Recipes visible to viewer
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  // Recipes (raw + filtered for viewer)
+  const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
+  const [visibleRecipes, setVisibleRecipes] = useState<Recipe[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState(true);
 
   // Modals
@@ -74,21 +77,19 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     return () => subscription.unsubscribe();
   }, []);
 
-  // ===== Load the viewed profile by display_name or fallback to id
+  // ===== Load the viewed profile by display_name OR fallback to id
   useEffect(() => {
     let cancelled = false;
-
     async function loadViewed() {
       setLoadingViewed(true);
       setLoadErr(null);
 
-      // Try display_name first (your app tends to link by display_name)
+      // Try by display_name first
       const { data: byName, error: nameErr } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url, bio')
         .eq('display_name', handleParam)
         .limit(1);
-
       if (cancelled) return;
 
       if (nameErr) {
@@ -98,9 +99,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         return;
       }
 
-      let prof: Profile | null = byName?.[0] as Profile | undefined ?? null;
+      let prof: Profile | null = (byName?.[0] as Profile) ?? null;
 
-      // Fallback to treat handle as literal profile id (UUID)
+      // Fallback: treat handle as literal id
       if (!prof) {
         const { data: byId, error: idErr } = await supabase
           .from('profiles')
@@ -115,7 +116,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           setLoadingViewed(false);
           return;
         }
-        prof = byId?.[0] as Profile | undefined ?? null;
+        prof = (byId?.[0] as Profile) ?? null;
       }
 
       setViewed(prof);
@@ -126,32 +127,26 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     return () => { cancelled = true; };
   }, [handleParam]);
 
-  // ===== Load stats, friendship, and recipes once we know viewed (and possibly viewer)
+  // ===== Load stats, friendship, and all recipes for the viewed user
   useEffect(() => {
     let cancelled = false;
     if (!viewed) return;
 
-    const viewedId = viewed.id; // helps TS know it's non-null
+    const viewedId = viewed.id;
 
     async function loadAll() {
-      // --- Friend count (RPC you already have) ---
+      // Friend count
       const { data: fc, error: fcErr } = await supabase.rpc('friend_count', { uid: viewedId });
-      if (!cancelled) {
-        setFriendCount(!fcErr && typeof fc === 'number' ? (fc as number) : 0);
-      }
+      if (!cancelled) setFriendCount(!fcErr && typeof fc === 'number' ? (fc as number) : 0);
 
-      // --- Total recipes added by viewed user (unfiltered) ---
-      {
-        const { count, error } = await supabase
-          .from('recipes')
-          .select('id', { count: 'exact', head: true })
-          .eq('user_id', viewedId);
-        if (!cancelled) {
-          setTotalAddedCount(!error && typeof count === 'number' ? count : 0);
-        }
-      }
+      // Total recipes (unfiltered)
+      const { count, error: cntErr } = await supabase
+        .from('recipes')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', viewedId);
+      if (!cancelled) setTotalAddedCount(!cntErr && typeof count === 'number' ? count : 0);
 
-      // --- Friendship state (viewer ↔ viewed) ---
+      // Friendship state
       if (viewerId && viewerId !== viewedId) {
         const { data: rows, error } = await supabase
           .from('friendships')
@@ -160,73 +155,71 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
             `and(requester_id.eq.${viewerId},addressee_id.eq.${viewedId}),and(requester_id.eq.${viewedId},addressee_id.eq.${viewerId})`
           )
           .limit(1);
-
         if (!cancelled) {
           if (error || !rows?.length) {
-            setIsFriend(false);
-            setRequestedOut(false);
-            setIncomingReq(false);
+            setIsFriend(false); setRequestedOut(false); setIncomingReq(false);
           } else {
             const r = rows[0] as { requester_id: string; addressee_id: string; status: string };
             if (r.status === 'accepted') {
-              setIsFriend(true);
-              setRequestedOut(false);
-              setIncomingReq(false);
+              setIsFriend(true); setRequestedOut(false); setIncomingReq(false);
             } else if (r.status === 'pending') {
               setIsFriend(false);
               setRequestedOut(r.requester_id === viewerId);
               setIncomingReq(r.addressee_id === viewerId);
             } else {
-              setIsFriend(false);
-              setRequestedOut(false);
-              setIncomingReq(false);
+              setIsFriend(false); setRequestedOut(false); setIncomingReq(false);
             }
           }
         }
       } else {
-        // viewing self or not signed in
-        if (!cancelled) {
-          setIsFriend(false);
-          setRequestedOut(false);
-          setIncomingReq(false);
-        }
+        if (!cancelled) { setIsFriend(false); setRequestedOut(false); setIncomingReq(false); }
       }
 
-      // --- Visible recipes for viewer ---
+      // All recipes for that user (no visibility filter here)
       setLoadingRecipes(true);
-
-      // Treat NULL as "public" (for old rows)
-      // Allowed visibilities:
-      const canSeeFriends = !!viewerId && (viewerId === viewedId || isFriend);
-      const allowed = canSeeFriends ? ['public', 'friends'] as const : ['public'] as const;
-
-      // Build an OR filter that includes null as public
-      // Example OR: "and(user_id.eq.<id>,recipe_visibility.in.(public,friends)),and(user_id.eq.<id>,recipe_visibility.is.null)"
-      const visList = allowed.join(',');
-      const orClause = canSeeFriends
-        ? `and(user_id.eq.${viewedId},recipe_visibility.in.(${visList})),and(user_id.eq.${viewedId},recipe_visibility.is.null)`
-        : `and(user_id.eq.${viewedId},recipe_visibility.eq.public),and(user_id.eq.${viewedId},recipe_visibility.is.null)`;
-
       const { data: rows, error: recErr } = await supabase
         .from('recipes')
         .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,recipe_visibility')
-        .or(orClause)
+        .eq('user_id', viewedId)
         .order('created_at', { ascending: false });
 
       if (!cancelled) {
         if (recErr) {
           console.error(recErr);
-          setRecipes([]);
+          setAllRecipes([]);
         } else {
-          setRecipes((rows as Recipe[]) ?? []);
+          setAllRecipes((rows as Recipe[]) ?? []);
         }
         setLoadingRecipes(false);
       }
     }
 
     loadAll();
-    // re-run when these change; friendship affects visibility
-  }, [viewed, viewerId, isFriend]);
+  }, [viewed, viewerId]);
+
+  // ===== Client-side visibility filtering (robust + simple)
+  useEffect(() => {
+    if (!viewed) {
+      setVisibleRecipes([]);
+      return;
+    }
+    const viewedId = viewed.id;
+    const canSeeFriends = !!viewerId && (viewerId === viewedId || isFriend);
+
+    const filtered = allRecipes.filter((r) => {
+      const v = (r.recipe_visibility || 'public') as RecipeVisibility; // treat null as public
+      if (v === 'private') {
+        // Explicitly hide private, even from self if you want. If self should see, uncomment:
+        // return viewerId === viewedId;
+        return false;
+      }
+      if (v === 'friends') return canSeeFriends;
+      // 'public' or null
+      return true;
+    });
+
+    setVisibleRecipes(filtered);
+  }, [allRecipes, viewerId, viewed, isFriend]);
 
   // ===== Friend button actions =====
   async function onAddFriend() {
@@ -322,7 +315,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // ---- Styles reused from My Cookbook ----
+  // ---- Styles copied to match My Cookbook vibe ----
   const statWrap: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
@@ -350,107 +343,8 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     marginTop: 2,
   };
 
-  // Friend Button (occupies the same header spot where Edit Profile is on My Cookbook)
-  function FriendButton() {
-    if (!viewed) return null;
-    if (!viewerId || viewerId === viewed.id) return null; // no friend button when logged out or viewing self
-
-    if (isFriend) {
-      return (
-        <button
-          onClick={onUnfriend}
-          disabled={busyFriend}
-          title="Remove friend"
-          style={{
-            padding: '8px 12px',
-            background: '#4CAF50',
-            color: '#fff',
-            borderRadius: 8,
-            border: 'none',
-            cursor: busyFriend ? 'not-allowed' : 'pointer',
-            fontSize: 14,
-          }}
-        >
-          Friend
-        </button>
-      );
-    }
-    if (requestedOut) {
-      return (
-        <button
-          disabled
-          title="Request sent"
-          style={{
-            padding: '8px 12px',
-            background: '#ddd',
-            color: '#333',
-            borderRadius: 8,
-            border: 'none',
-            fontSize: 14,
-            cursor: 'default',
-          }}
-        >
-          Requested
-        </button>
-      );
-    }
-    if (incomingReq) {
-      return (
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={onAccept}
-            disabled={busyFriend}
-            style={{
-              padding: '8px 12px',
-              background: '#4CAF50',
-              color: '#fff',
-              borderRadius: 8,
-              border: 'none',
-              cursor: busyFriend ? 'not-allowed' : 'pointer',
-              fontSize: 14,
-            }}
-          >
-            Accept
-          </button>
-          <button
-            onClick={onDecline}
-            disabled={busyFriend}
-            style={{
-              padding: '8px 12px',
-              background: '#eee',
-              color: '#111',
-              borderRadius: 8,
-              border: '1px solid #ddd',
-              cursor: busyFriend ? 'not-allowed' : 'pointer',
-              fontSize: 14,
-            }}
-          >
-            Decline
-          </button>
-        </div>
-      );
-    }
-    return (
-      <button
-        onClick={onAddFriend}
-        disabled={busyFriend}
-        style={{
-          padding: '8px 12px',
-          background: '#eee',
-          color: '#111',
-          borderRadius: 8,
-          border: '1px solid #ddd',
-          cursor: busyFriend ? 'not-allowed' : 'pointer',
-          fontSize: 14,
-        }}
-      >
-        Add Friend
-      </button>
-    );
-  }
-
-  // Profile strip (no box; avatar same sizing as your My Cookbook header area)
-  function ProfileStrip() {
+  // Profile strip row (NO box), with Friend button aligned to the right
+  function ProfileRow() {
     if (!viewed) return null;
     const name = viewed.display_name || viewed.nickname || 'User';
     return (
@@ -458,35 +352,136 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between', // ← friend button on right, content on left
           gap: 12,
           marginBottom: 8,
-          // no background/border to match My Cookbook
         }}
       >
-        <img
-          src={viewed.avatar_url || '/avatar-placeholder.png'}
-          alt={name}
-          style={{
-            width: 64,               // match your My Cookbook avatar size
-            height: 64,
-            borderRadius: '50%',
-            objectFit: 'cover',
-            border: '1px solid #ddd',
-          }}
-        />
-        <div style={{ display: 'grid' }}>
-          <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{name}</div>
-          {viewed.bio ? (
-            <div style={{ color: '#666', fontSize: 13, marginTop: 2 }}>{viewed.bio}</div>
+        {/* Left: avatar + name + bio (no box) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img
+            src={viewed.avatar_url || '/avatar-placeholder.png'}
+            alt={name}
+            style={{
+              width: AVATAR_SIZE,
+              height: AVATAR_SIZE,
+              borderRadius: '50%',
+              objectFit: 'cover',
+              border: '1px solid #ddd',
+            }}
+          />
+          <div style={{ display: 'grid' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{name}</div>
+            {viewed.bio ? (
+              <div style={{ color: '#666', fontSize: 13, marginTop: 2 }}>{viewed.bio}</div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Right: Friend button (takes place of Edit Profile) */}
+        <div>
+          {/* Only show when logged in and not viewing self */}
+          {viewerId && viewed && viewerId !== viewed.id ? (
+            isFriend ? (
+              <button
+                onClick={onUnfriend}
+                disabled={busyFriend}
+                title="Remove friend"
+                style={{
+                  padding: '8px 12px',
+                  background: '#4CAF50',
+                  color: '#fff',
+                  borderRadius: 8,
+                  border: 'none',
+                  cursor: busyFriend ? 'not-allowed' : 'pointer',
+                  fontSize: 14,
+                }}
+              >
+                Friend
+              </button>
+            ) : requestedOut ? (
+              <button
+                disabled
+                title="Request sent"
+                style={{
+                  padding: '8px 12px',
+                  background: '#ddd',
+                  color: '#333',
+                  borderRadius: 8,
+                  border: 'none',
+                  fontSize: 14,
+                  cursor: 'default',
+                }}
+              >
+                Requested
+              </button>
+            ) : incomingReq ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={onAccept}
+                  disabled={busyFriend}
+                  style={{
+                    padding: '8px 12px',
+                    background: '#4CAF50',
+                    color: '#fff',
+                    borderRadius: 8,
+                    border: 'none',
+                    cursor: busyFriend ? 'not-allowed' : 'pointer',
+                    fontSize: 14,
+                  }}
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={onDecline}
+                  disabled={busyFriend}
+                  style={{
+                    padding: '8px 12px',
+                    background: '#eee',
+                    color: '#111',
+                    borderRadius: 8,
+                    border: '1px solid #ddd',
+                    cursor: busyFriend ? 'not-allowed' : 'pointer',
+                    fontSize: 14,
+                  }}
+                >
+                  Decline
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={onAddFriend}
+                disabled={busyFriend}
+                style={{
+                  padding: '8px 12px',
+                  background: '#eee',
+                  color: '#111',
+                  borderRadius: 8,
+                  border: '1px solid #ddd',
+                  cursor: busyFriend ? 'not-allowed' : 'pointer',
+                  fontSize: 14,
+                }}
+              >
+                Add Friend
+              </button>
+            )
           ) : null}
         </div>
       </div>
     );
   }
 
-  const headerLeft = useMemo(
+  // Back button (top-left, like you asked)
+  const Header = useMemo(
     () => (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-start',
+          alignItems: 'center',
+          marginBottom: 12,
+        }}
+      >
         <button
           onClick={() => window.history.back()}
           aria-label="Go back"
@@ -501,34 +496,24 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         >
           ← Back
         </button>
-        {/* no page title to match your request */}
-      </div>
+        {/* No page title to match My Cookbook */}
+      </header>
     ),
     []
   );
 
   return (
     <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
-      {/* HEADER (Back on left, Friend button on right) */}
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 12,
-        }}
-      >
-        {headerLeft}
-        <FriendButton />
-      </header>
+      {Header}
 
-      {/* PROFILE STRIP (no box) */}
+      {/* PROFILE row (no box, avatar size controlled via AVATAR_SIZE) */}
       <section>
-        <ProfileStrip />
+        <ProfileRow />
       </section>
 
-      {/* STATS ROW (Friends → modal for viewed user; Recipes Added shows total from viewed user) */}
+      {/* STATS ROW */}
       <div style={statWrap}>
+        {/* Friends → opens modal for viewed user */}
         <button
           type="button"
           onClick={() => setFriendsOpen(true)}
@@ -539,6 +524,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           <div style={statLabel}>Friends</div>
         </button>
 
+        {/* Recipes Added → full total for viewed user */}
         <button
           type="button"
           onClick={scrollToGrid}
@@ -549,6 +535,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           <div style={statLabel}>Recipes Added</div>
         </button>
 
+        {/* Recipes Cooked (placeholder) */}
         <button
           type="button"
           onClick={scrollToGrid}
@@ -560,7 +547,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         </button>
       </div>
 
-      {/* RECIPES GRID (mirrors My Cookbook) */}
+      {/* RECIPES GRID — mirrors My Cookbook */}
       <div ref={gridRef}>
         {loadingViewed ? (
           <div>Loading user…</div>
@@ -568,7 +555,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           <div style={{ color: '#b42318' }}>{loadErr || 'User not found.'}</div>
         ) : loadingRecipes ? (
           <div>Loading recipes…</div>
-        ) : recipes.length === 0 ? (
+        ) : visibleRecipes.length === 0 ? (
           <div
             style={{
               background: '#fff',
@@ -582,7 +569,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           </div>
         ) : (
           <div style={recipeGridStyle}>
-            {recipes.map((r) => (
+            {visibleRecipes.map((r) => (
               <RecipeTile
                 key={r.id}
                 title={r.title}
