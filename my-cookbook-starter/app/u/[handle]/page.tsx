@@ -28,8 +28,9 @@ type Profile = {
   bio?: string | null;
 };
 
-// 👇 Set this to match the avatar size used by ProfileSection on "My Cookbook".
-const AVATAR_SIZE = 64; // ← If your My Cookbook avatar is 56 or 72, change this one number.
+// ❗ Set this to EXACTLY match ProfileSection's avatar size on My Cookbook.
+// If you're not sure yet, 64 is a safe default; change this one number later.
+const AVATAR_SIZE = 64;
 
 export default function OtherCookbookPage({ params }: { params: { handle: string } }) {
   const handleParam = decodeURIComponent(params.handle || '').trim();
@@ -40,7 +41,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   const [loadingViewed, setLoadingViewed] = useState(true);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  // Friendship state (viewer ↔ viewed)
+  // Friendship state
   const [isFriend, setIsFriend] = useState(false);
   const [requestedOut, setRequestedOut] = useState(false);
   const [incomingReq, setIncomingReq] = useState(false);
@@ -51,7 +52,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   const [totalAddedCount, setTotalAddedCount] = useState(0);
   const [recipesCookedCount] = useState(0); // placeholder
 
-  // Recipes (raw + filtered for viewer)
+  // Recipes (we’ll revisit visibility later)
   const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
   const [visibleRecipes, setVisibleRecipes] = useState<Recipe[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState(true);
@@ -61,10 +62,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   const [open, setOpen] = useState(false);
   const [friendsOpen, setFriendsOpen] = useState(false);
 
-  // Scroll ref
   const gridRef = useRef<HTMLDivElement | null>(null);
 
-  // ===== Auth: who is the viewer?
+  // --- Auth
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -77,21 +77,20 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     return () => subscription.unsubscribe();
   }, []);
 
-  // ===== Load the viewed profile by display_name OR fallback to id
+  // --- Load viewed profile (by display_name first, then id)
   useEffect(() => {
     let cancelled = false;
     async function loadViewed() {
       setLoadingViewed(true);
       setLoadErr(null);
 
-      // Try by display_name first
       const { data: byName, error: nameErr } = await supabase
         .from('profiles')
         .select('id, display_name, nickname, avatar_url, bio')
         .eq('display_name', handleParam)
         .limit(1);
-      if (cancelled) return;
 
+      if (cancelled) return;
       if (nameErr) {
         setLoadErr(nameErr.message);
         setViewed(null);
@@ -101,7 +100,6 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
 
       let prof: Profile | null = (byName?.[0] as Profile) ?? null;
 
-      // Fallback: treat handle as literal id
       if (!prof) {
         const { data: byId, error: idErr } = await supabase
           .from('profiles')
@@ -109,7 +107,6 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           .eq('id', handleParam)
           .limit(1);
         if (cancelled) return;
-
         if (idErr) {
           setLoadErr(idErr.message);
           setViewed(null);
@@ -122,31 +119,27 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
       setViewed(prof);
       setLoadingViewed(false);
     }
-
     loadViewed();
     return () => { cancelled = true; };
   }, [handleParam]);
 
-  // ===== Load stats, friendship, and all recipes for the viewed user
+  // --- Load stats, friendship, and all recipes
   useEffect(() => {
     let cancelled = false;
     if (!viewed) return;
-
     const viewedId = viewed.id;
 
     async function loadAll() {
-      // Friend count
       const { data: fc, error: fcErr } = await supabase.rpc('friend_count', { uid: viewedId });
       if (!cancelled) setFriendCount(!fcErr && typeof fc === 'number' ? (fc as number) : 0);
 
-      // Total recipes (unfiltered)
       const { count, error: cntErr } = await supabase
         .from('recipes')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', viewedId);
       if (!cancelled) setTotalAddedCount(!cntErr && typeof count === 'number' ? count : 0);
 
-      // Friendship state
+      // friendship
       if (viewerId && viewerId !== viewedId) {
         const { data: rows, error } = await supabase
           .from('friendships')
@@ -155,6 +148,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
             `and(requester_id.eq.${viewerId},addressee_id.eq.${viewedId}),and(requester_id.eq.${viewedId},addressee_id.eq.${viewerId})`
           )
           .limit(1);
+
         if (!cancelled) {
           if (error || !rows?.length) {
             setIsFriend(false); setRequestedOut(false); setIncomingReq(false);
@@ -175,7 +169,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         if (!cancelled) { setIsFriend(false); setRequestedOut(false); setIncomingReq(false); }
       }
 
-      // All recipes for that user (no visibility filter here)
+      // all recipes (we’ll filter client-side)
       setLoadingRecipes(true);
       const { data: rows, error: recErr } = await supabase
         .from('recipes')
@@ -197,31 +191,26 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     loadAll();
   }, [viewed, viewerId]);
 
-  // ===== Client-side visibility filtering (robust + simple)
+  // --- Client-side visibility filter (we’ll revisit if needed)
   useEffect(() => {
-    if (!viewed) {
-      setVisibleRecipes([]);
-      return;
-    }
+    if (!viewed) { setVisibleRecipes([]); return; }
     const viewedId = viewed.id;
     const canSeeFriends = !!viewerId && (viewerId === viewedId || isFriend);
 
     const filtered = allRecipes.filter((r) => {
       const v = (r.recipe_visibility || 'public') as RecipeVisibility; // treat null as public
       if (v === 'private') {
-        // Explicitly hide private, even from self if you want. If self should see, uncomment:
-        // return viewerId === viewedId;
+        // If you want self to see private, change to: return viewerId === viewedId;
         return false;
       }
       if (v === 'friends') return canSeeFriends;
-      // 'public' or null
-      return true;
+      return true; // public or null
     });
 
     setVisibleRecipes(filtered);
   }, [allRecipes, viewerId, viewed, isFriend]);
 
-  // ===== Friend button actions =====
+  // --- Friend actions
   async function onAddFriend() {
     if (!viewerId || !viewed || viewerId === viewed.id || busyFriend) return;
     setBusyFriend(true);
@@ -236,13 +225,8 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
       if (error) throw error;
       setRequestedOut(true);
       setIncomingReq(false);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setBusyFriend(false);
-    }
+    } finally { setBusyFriend(false); }
   }
-
   async function onUnfriend() {
     if (!viewerId || !viewed || busyFriend) return;
     setBusyFriend(true);
@@ -254,16 +238,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           `and(requester_id.eq.${viewerId},addressee_id.eq.${viewed.id},status.eq.accepted),and(requester_id.eq.${viewed.id},addressee_id.eq.${viewerId},status.eq.accepted)`
         );
       if (error) throw error;
-      setIsFriend(false);
-      setRequestedOut(false);
-      setIncomingReq(false);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setBusyFriend(false);
-    }
+      setIsFriend(false); setRequestedOut(false); setIncomingReq(false);
+    } finally { setBusyFriend(false); }
   }
-
   async function onAccept() {
     if (!viewerId || !viewed || busyFriend) return;
     setBusyFriend(true);
@@ -273,16 +250,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         .update({ status: 'accepted', updated_at: new Date().toISOString() })
         .match({ requester_id: viewed.id, addressee_id: viewerId, status: 'pending' });
       if (error) throw error;
-      setIsFriend(true);
-      setRequestedOut(false);
-      setIncomingReq(false);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setBusyFriend(false);
-    }
+      setIsFriend(true); setRequestedOut(false); setIncomingReq(false);
+    } finally { setBusyFriend(false); }
   }
-
   async function onDecline() {
     if (!viewerId || !viewed || busyFriend) return;
     setBusyFriend(true);
@@ -292,30 +262,16 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         .delete()
         .match({ requester_id: viewed.id, addressee_id: viewerId, status: 'pending' });
       if (error) throw error;
-      setIsFriend(false);
-      setRequestedOut(false);
-      setIncomingReq(false);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setBusyFriend(false);
-    }
+      setIsFriend(false); setRequestedOut(false); setIncomingReq(false);
+    } finally { setBusyFriend(false); }
   }
 
-  // ===== UI helpers =====
-  function openRecipe(r: Recipe) {
-    setSelected(r);
-    setOpen(true);
-  }
-  function closeRecipe() {
-    setOpen(false);
-    setSelected(null);
-  }
-  function scrollToGrid() {
-    gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+  // --- UI helpers
+  function openRecipe(r: Recipe) { setSelected(r); setOpen(true); }
+  function closeRecipe() { setOpen(false); setSelected(null); }
+  function scrollToGrid() { gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 
-  // ---- Styles copied to match My Cookbook vibe ----
+  // --- styles (match My Cookbook vibe)
   const statWrap: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
@@ -343,135 +299,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     marginTop: 2,
   };
 
-  // Profile strip row (NO box), with Friend button aligned to the right
-  function ProfileRow() {
-    if (!viewed) return null;
-    const name = viewed.display_name || viewed.nickname || 'User';
-    return (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between', // ← friend button on right, content on left
-          gap: 12,
-          marginBottom: 8,
-        }}
-      >
-        {/* Left: avatar + name + bio (no box) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img
-            src={viewed.avatar_url || '/avatar-placeholder.png'}
-            alt={name}
-            style={{
-              width: AVATAR_SIZE,
-              height: AVATAR_SIZE,
-              borderRadius: '50%',
-              objectFit: 'cover',
-              border: '1px solid #ddd',
-            }}
-          />
-          <div style={{ display: 'grid' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{name}</div>
-            {viewed.bio ? (
-              <div style={{ color: '#666', fontSize: 13, marginTop: 2 }}>{viewed.bio}</div>
-            ) : null}
-          </div>
-        </div>
-
-        {/* Right: Friend button (takes place of Edit Profile) */}
-        <div>
-          {/* Only show when logged in and not viewing self */}
-          {viewerId && viewed && viewerId !== viewed.id ? (
-            isFriend ? (
-              <button
-                onClick={onUnfriend}
-                disabled={busyFriend}
-                title="Remove friend"
-                style={{
-                  padding: '8px 12px',
-                  background: '#4CAF50',
-                  color: '#fff',
-                  borderRadius: 8,
-                  border: 'none',
-                  cursor: busyFriend ? 'not-allowed' : 'pointer',
-                  fontSize: 14,
-                }}
-              >
-                Friend
-              </button>
-            ) : requestedOut ? (
-              <button
-                disabled
-                title="Request sent"
-                style={{
-                  padding: '8px 12px',
-                  background: '#ddd',
-                  color: '#333',
-                  borderRadius: 8,
-                  border: 'none',
-                  fontSize: 14,
-                  cursor: 'default',
-                }}
-              >
-                Requested
-              </button>
-            ) : incomingReq ? (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={onAccept}
-                  disabled={busyFriend}
-                  style={{
-                    padding: '8px 12px',
-                    background: '#4CAF50',
-                    color: '#fff',
-                    borderRadius: 8,
-                    border: 'none',
-                    cursor: busyFriend ? 'not-allowed' : 'pointer',
-                    fontSize: 14,
-                  }}
-                >
-                  Accept
-                </button>
-                <button
-                  onClick={onDecline}
-                  disabled={busyFriend}
-                  style={{
-                    padding: '8px 12px',
-                    background: '#eee',
-                    color: '#111',
-                    borderRadius: 8,
-                    border: '1px solid #ddd',
-                    cursor: busyFriend ? 'not-allowed' : 'pointer',
-                    fontSize: 14,
-                  }}
-                >
-                  Decline
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={onAddFriend}
-                disabled={busyFriend}
-                style={{
-                  padding: '8px 12px',
-                  background: '#eee',
-                  color: '#111',
-                  borderRadius: 8,
-                  border: '1px solid #ddd',
-                  cursor: busyFriend ? 'not-allowed' : 'pointer',
-                  fontSize: 14,
-                }}
-              >
-                Add Friend
-              </button>
-            )
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
-  // Back button (top-left, like you asked)
+  // Header with Back button ONLY (no page title)
   const Header = useMemo(
     () => (
       <header
@@ -496,58 +324,160 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         >
           ← Back
         </button>
-        {/* No page title to match My Cookbook */}
       </header>
     ),
     []
   );
 
+  // Profile strip: avatar + name + bio, THEN full-width friend button below
+  function ProfileBlock() {
+    if (!viewed) return null;
+    const name = viewed.display_name || viewed.nickname || 'User';
+
+    const friendButton =
+      !viewerId || viewerId === viewed.id ? null
+      : isFriend ? (
+          <button
+            onClick={onUnfriend}
+            disabled={busyFriend}
+            title="Remove friend"
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              background: '#4CAF50',
+              color: '#fff',
+              borderRadius: 10,
+              border: 'none',
+              cursor: busyFriend ? 'not-allowed' : 'pointer',
+              fontSize: 16,
+            }}
+          >
+            Friend
+          </button>
+        ) : requestedOut ? (
+          <button
+            disabled
+            title="Request sent"
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              background: '#ddd',
+              color: '#333',
+              borderRadius: 10,
+              border: 'none',
+              fontSize: 16,
+              cursor: 'default',
+            }}
+          >
+            Requested
+          </button>
+        ) : incomingReq ? (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <button
+              onClick={onAccept}
+              disabled={busyFriend}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                background: '#4CAF50',
+                color: '#fff',
+                borderRadius: 10,
+                border: 'none',
+                cursor: busyFriend ? 'not-allowed' : 'pointer',
+                fontSize: 16,
+              }}
+            >
+              Accept
+            </button>
+            <button
+              onClick={onDecline}
+              disabled={busyFriend}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                background: '#eee',
+                color: '#111',
+                borderRadius: 10,
+                border: '1px solid #ddd',
+                cursor: busyFriend ? 'not-allowed' : 'pointer',
+                fontSize: 16,
+              }}
+            >
+              Decline
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onAddFriend}
+            disabled={busyFriend}
+            style={{
+              width: '100%',
+              padding: '10px 14px',
+              background: '#eee',
+              color: '#111',
+              borderRadius: 10,
+              border: '1px solid #ddd',
+              cursor: busyFriend ? 'not-allowed' : 'pointer',
+              fontSize: 16,
+            }}
+          >
+            Add Friend
+          </button>
+        );
+
+    return (
+      <section style={{ marginBottom: 8 }}>
+        {/* Row: avatar + text (NO box) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <img
+            src={viewed.avatar_url || '/avatar-placeholder.png'}
+            alt={name}
+            style={{
+              width: AVATAR_SIZE,
+              height: AVATAR_SIZE,
+              borderRadius: '50%',
+              objectFit: 'cover',
+              border: '1px solid #ddd',
+            }}
+          />
+          <div style={{ display: 'grid' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{name}</div>
+            {viewed.bio ? (
+              <div style={{ color: '#666', fontSize: 13, marginTop: 2 }}>{viewed.bio}</div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Full-width friend button BELOW bio */}
+        {friendButton}
+      </section>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
       {Header}
 
-      {/* PROFILE row (no box, avatar size controlled via AVATAR_SIZE) */}
-      <section>
-        <ProfileRow />
-      </section>
+      {/* Profile + full-width friend button */}
+      <ProfileBlock />
 
-      {/* STATS ROW */}
+      {/* Stats row */}
       <div style={statWrap}>
-        {/* Friends → opens modal for viewed user */}
-        <button
-          type="button"
-          onClick={() => setFriendsOpen(true)}
-          style={statCard}
-          aria-label="Open friends list"
-        >
+        <button type="button" onClick={() => setFriendsOpen(true)} style={statCard} aria-label="Open friends list">
           <div style={statNumber}>{friendCount}</div>
           <div style={statLabel}>Friends</div>
         </button>
-
-        {/* Recipes Added → full total for viewed user */}
-        <button
-          type="button"
-          onClick={scrollToGrid}
-          style={statCard}
-          aria-label="Scroll to recipes"
-        >
+        <button type="button" onClick={scrollToGrid} style={statCard} aria-label="Scroll to recipes">
           <div style={statNumber}>{totalAddedCount}</div>
           <div style={statLabel}>Recipes Added</div>
         </button>
-
-        {/* Recipes Cooked (placeholder) */}
-        <button
-          type="button"
-          onClick={scrollToGrid}
-          style={statCard}
-          aria-label="Scroll to recipes cooked"
-        >
+        <button type="button" onClick={scrollToGrid} style={statCard} aria-label="Scroll to recipes cooked">
           <div style={statNumber}>{recipesCookedCount}</div>
           <div style={statLabel}>Recipes Cooked</div>
         </button>
       </div>
 
-      {/* RECIPES GRID — mirrors My Cookbook */}
+      {/* Recipes grid */}
       <div ref={gridRef}>
         {loadingViewed ? (
           <div>Loading user…</div>
@@ -559,7 +489,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           <div
             style={{
               background: '#fff',
-              border: '1px solid #eee',
+              border: '1px solid '#eee',
               borderRadius: 12,
               padding: 16,
               color: '#606375',
@@ -582,7 +512,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         )}
       </div>
 
-      {/* MODALS */}
+      {/* Modals */}
       <RecipeModal open={open} onClose={closeRecipe} recipe={selected} />
       {viewed ? (
         <FriendsListModal
