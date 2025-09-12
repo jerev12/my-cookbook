@@ -11,7 +11,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
   const [friends, setFriends] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Relationship sets relative to me
+  // Relationship sets relative to me (viewer)
   const [acceptedWithMe, setAcceptedWithMe] = useState<Set<string>>(new Set());
   const [requestedOut, setRequestedOut] = useState<Set<string>>(new Set());
   const [incomingToMe, setIncomingToMe] = useState<Set<string>>(new Set());
@@ -24,75 +24,84 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!cancelled) setMe(user?.id ?? null);
 
-      // accepted friendships involving viewed user
+      // ===== Fetch the viewed user's accepted friends via RPC (bypasses RLS safely) =====
       setLoading(true);
-      const { data: accRows, error: accErr } = await supabase
-        .from('friendships')
-        .select('requester_id, addressee_id')
-        .eq('status', 'accepted')
-        .or(`requester_id.eq.${userId},addressee_id.eq.${userId}`);
-
-      if (accErr) {
-        console.error(accErr);
-        if (!cancelled) { setFriends([]); setAcceptedWithMe(new Set()); setRequestedOut(new Set()); setIncomingToMe(new Set()); setLoading(false); }
+      const { data: list, error: rpcErr } = await supabase.rpc('friends_of_user', { target_user: userId });
+      if (rpcErr) {
+        console.error(rpcErr);
+        if (!cancelled) {
+          setFriends([]);
+          setAcceptedWithMe(new Set());
+          setRequestedOut(new Set());
+          setIncomingToMe(new Set());
+          setLoading(false);
+        }
         return;
       }
 
-      const otherIds = (accRows ?? []).map(r => {
-        const req = r.requester_id as string;
-        const add = r.addressee_id as string;
-        return req === userId ? add : req;
-      });
-      const uniqueOtherIds = Array.from(new Set(otherIds));
-
-      if (uniqueOtherIds.length === 0) {
-        if (!cancelled) { setFriends([]); setAcceptedWithMe(new Set()); setRequestedOut(new Set()); setIncomingToMe(new Set()); setLoading(false); }
-        return;
-      }
-
-      // fetch friend profiles
-      const { data: profs, error: pErr } = await supabase
-        .from('profiles')
-        .select('id, display_name, avatar_url')
-        .in('id', uniqueOtherIds);
-      if (pErr) {
-        console.error(pErr);
-        if (!cancelled) { setFriends([]); setAcceptedWithMe(new Set()); setRequestedOut(new Set()); setIncomingToMe(new Set()); setLoading(false); }
-        return;
-      }
-
-      const sorted = [...(profs ?? [])].sort((a: Profile, b: Profile) => {
+      const sorted = ((list ?? []) as Profile[]).slice().sort((a, b) => {
         const an = (a.display_name ?? '').toLowerCase();
         const bn = (b.display_name ?? '').toLowerCase();
         if (an < bn) return -1;
         if (an > bn) return 1;
         return a.id < b.id ? -1 : 1;
       });
-      if (!cancelled) setFriends(sorted as Profile[]);
+      if (!cancelled) setFriends(sorted);
 
-      // if not signed in, skip relations (buttons will be disabled Add)
+      // If not signed in, stop here (no relationship buttons)
       if (!user?.id) {
-        if (!cancelled) { setAcceptedWithMe(new Set()); setRequestedOut(new Set()); setIncomingToMe(new Set()); setLoading(false); }
+        if (!cancelled) {
+          setAcceptedWithMe(new Set());
+          setRequestedOut(new Set());
+          setIncomingToMe(new Set());
+          setLoading(false);
+        }
         return;
       }
 
-      // compute my relations to those users
+      // ===== Compute my relationships with these users (RLS allows this because it involves me) =====
+      const friendIds = sorted.map(p => p.id);
+      if (friendIds.length === 0) {
+        if (!cancelled) {
+          setAcceptedWithMe(new Set());
+          setRequestedOut(new Set());
+          setIncomingToMe(new Set());
+          setLoading(false);
+        }
+        return;
+      }
+
+      // Outgoing pending (me -> them)
+      const { data: outPendRows } = await supabase
+        .from('friendships')
+        .select('addressee_id')
+        .eq('requester_id', user.id)
+        .eq('status', 'pending');
+
+      const outSet = new Set<string>((outPendRows ?? []).map(r => String(r.addressee_id)));
+
+      // All relations where *I* am involved and the other side is one of friendIds
       const { data: relRows, error: relErr } = await supabase
         .from('friendships')
         .select('requester_id, addressee_id, status')
         .or(
-          `and(requester_id.eq.${user.id},addressee_id.in.(${uniqueOtherIds.join(
+          `and(requester_id.eq.${user.id},addressee_id.in.(${friendIds.join(
             ','
-          )})),and(requester_id.in.(${uniqueOtherIds.join(',')}),addressee_id.eq.${user.id})`
+          )})),and(requester_id.in.(${friendIds.join(',')}),addressee_id.eq.${user.id})`
         );
+
       if (relErr) {
         console.error(relErr);
-        if (!cancelled) { setAcceptedWithMe(new Set()); setRequestedOut(new Set()); setIncomingToMe(new Set()); setLoading(false); }
+        if (!cancelled) {
+          setAcceptedWithMe(new Set());
+          setRequestedOut(outSet);
+          setIncomingToMe(new Set());
+          setLoading(false);
+        }
         return;
       }
 
       const accSet = new Set<string>();
-      const outSet = new Set<string>();
       const inSet = new Set<string>();
 
       (relRows ?? []).forEach((row) => {
@@ -104,8 +113,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
 
         if (st === 'accepted') accSet.add(other);
         else if (st === 'pending') {
-          if (req === user.id) outSet.add(add);       // me -> them
-          else if (add === user.id) inSet.add(req);   // them -> me
+          if (req !== user.id && add === user.id) inSet.add(req); // incoming to me
         }
       });
 
@@ -277,9 +285,10 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
           {friends.map((f) => {
             const handle = f.display_name ? encodeURIComponent(f.display_name) : f.id;
             const href = `/u/${handle}`;
-            const isAccepted = acceptedWithMe.has(f.id);
-            const isRequestedOut = requestedOut.has(f.id);
-            const isIncoming = incomingToMe.has(f.id);
+            const isAccepted = acceptedWithMe.has(f.id); // my relation to them
+            const isRequestedOut = requestedOut.has(f.id); // I sent pending to them
+            const isIncoming = incomingToMe.has(f.id); // they sent pending to me
+            const isSelf = me != null && f.id === me;
 
             return (
               <li
@@ -294,11 +303,13 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
                     alt=""
                     style={{ height: 40, width: 40, borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }}
                   />
-                  <div style={nameStyle}>{f.display_name || f.id}</div>
+                  <div style={nameStyle}>{isSelf ? 'You' : (f.display_name || f.id)}</div>
                 </Link>
 
                 {/* Right: action based on my relationship to them */}
-                {!me ? (
+                {isSelf ? (
+                  <div />  {/* no button for yourself */}
+                ) : !me ? (
                   <button style={btnDarkGray} disabled aria-label="Sign in to add">Add Friend</button>
                 ) : isAccepted ? (
                   <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); unfriend(f.id); }} style={btnGreen} aria-label="Remove friend">Friend</button>
