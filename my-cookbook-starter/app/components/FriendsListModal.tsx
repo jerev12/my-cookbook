@@ -6,9 +6,13 @@ import FriendsList from './FriendsList';
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** When provided, the modal shows the friends of this userId (viewed user).
+   *  When omitted, it shows the signed-in user's requests + friends (current behavior).
+   */
+  userId?: string;
 };
 
-export default function FriendsListModal({ open, onClose }: Props) {
+export default function FriendsListModal({ open, onClose, userId }: Props) {
   // ⛔ Lock background scroll while modal is open (iOS-friendly)
   useEffect(() => {
     if (!open) return;
@@ -99,7 +103,10 @@ export default function FriendsListModal({ open, onClose }: Props) {
 
         {/* Body: make inner content scroll, not the page */}
         <div style={{ marginTop: 8, overflowY: 'auto', maxHeight: 'calc(90vh - 48px)' }}>
-          <FriendsList />
+          {/* Pass userId down so FriendsList can render either:
+              - viewed user's accepted friends (when userId is provided), or
+              - current user's requests + friends (when omitted). */}
+          <FriendsList userId={userId} />
         </div>
       </div>
     </div>
