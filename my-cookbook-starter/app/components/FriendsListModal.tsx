@@ -2,18 +2,19 @@
 
 import { MouseEvent, useEffect } from 'react';
 import FriendsList from './FriendsList';
+import FriendsListForUser from './FriendsListForUser';
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** When provided, the modal shows the friends of this userId (viewed user).
-   *  When omitted, it shows the signed-in user's requests + friends (current behavior).
+  /** When provided, show the viewed user's accepted friends.
+   *  When omitted, show the signed-in user's Requests + Friends.
    */
   userId?: string;
 };
 
 export default function FriendsListModal({ open, onClose, userId }: Props) {
-  // ⛔ Lock background scroll while modal is open (iOS-friendly)
+  // Lock background scroll while modal is open
   useEffect(() => {
     if (!open) return;
 
@@ -35,14 +36,12 @@ export default function FriendsListModal({ open, onClose, userId }: Props) {
     document.body.style.width = '100%';
 
     return () => {
-      // restore body styles
       document.body.style.position = original.position;
       document.body.style.top = original.top;
       document.body.style.left = original.left;
       document.body.style.right = original.right;
       document.body.style.overflow = original.overflow;
       document.body.style.width = original.width;
-      // scroll back to previous position
       window.scrollTo(0, scrollY);
     };
   }, [open]);
@@ -63,8 +62,8 @@ export default function FriendsListModal({ open, onClose, userId }: Props) {
         alignItems: 'center',
         justifyContent: 'center',
         padding: 12,
-        zIndex: 60, // above the recipe modal
-        touchAction: 'none', // extra safety on mobile to prevent background scroll
+        zIndex: 60,
+        touchAction: 'none',
       }}
       aria-modal="true"
       role="dialog"
@@ -78,12 +77,12 @@ export default function FriendsListModal({ open, onClose, userId }: Props) {
           borderRadius: 12,
           padding: 16,
           position: 'relative',
-          overflow: 'hidden', // guard: content scrolls, backdrop stays put
+          overflow: 'hidden',
           boxSizing: 'border-box',
         }}
         onClick={stop}
       >
-        {/* Close button only (no title) */}
+        {/* Close */}
         <button
           onClick={onClose}
           aria-label="Close"
@@ -101,12 +100,9 @@ export default function FriendsListModal({ open, onClose, userId }: Props) {
           ✕
         </button>
 
-        {/* Body: make inner content scroll, not the page */}
+        {/* Body */}
         <div style={{ marginTop: 8, overflowY: 'auto', maxHeight: 'calc(90vh - 48px)' }}>
-          {/* Pass userId down so FriendsList can render either:
-              - viewed user's accepted friends (when userId is provided), or
-              - current user's requests + friends (when omitted). */}
-          <FriendsList userId={userId} />
+          {userId ? <FriendsListForUser userId={userId} /> : <FriendsList />}
         </div>
       </div>
     </div>
