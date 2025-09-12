@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -19,7 +19,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
+    async function run() {
       // who am I
       const { data: { user } } = await supabase.auth.getUser();
       if (!cancelled) setMe(user?.id ?? null);
@@ -79,7 +79,7 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
         .eq('status', 'pending');
       const outSet = new Set<string>((outPendRows ?? []).map(r => String(r.addressee_id)));
 
-      // All relations where I am involved and the other side is in friendIds
+      // Any relation where I’m involved and the other side is in friendIds
       const { data: relRows, error: relErr } = await supabase
         .from('friendships')
         .select('requester_id, addressee_id, status')
@@ -122,8 +122,9 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
         setIncomingToMe(inSet);
         setLoading(false);
       }
-    })();
+    }
 
+    run();
     return () => { cancelled = true; };
   }, [userId]);
 
@@ -273,61 +274,58 @@ export default function FriendsListForUser({ userId }: { userId: string }) {
     whiteSpace: 'nowrap',
   };
 
-  const friendsSection = useMemo(() => {
-    if (loading) return <p>Loading friends…</p>;
-    if (friends.length === 0) return <p>No friends yet.</p>;
+  // render
+  if (loading) return <p>Loading friends…</p>;
+  if (friends.length === 0) return <p>No friends yet.</p>;
 
-    return (
-      <>
-        <div style={{ fontWeight: 700, margin: '0 0 8px 2px' }}>Friends</div>
-        <ul style={listWrap}>
-          {friends.map((f) => {
-            const handle = f.display_name ? encodeURIComponent(f.display_name) : f.id;
-            const href = `/u/${handle}`;
-            const isAccepted = acceptedWithMe.has(f.id);
-            const isRequestedOut = requestedOut.has(f.id);
-            const isIncoming = incomingToMe.has(f.id);
-            const isSelf = me != null && f.id === me;
+  return (
+    <div>
+      <div style={{ fontWeight: 700, margin: '0 0 8px 2px' }}>Friends</div>
+      <ul style={listWrap}>
+        {friends.map((f) => {
+          const handle = f.display_name ? encodeURIComponent(f.display_name) : f.id;
+          const href = `/u/${handle}`;
+          const isAccepted = acceptedWithMe.has(f.id);
+          const isRequestedOut = requestedOut.has(f.id);
+          const isIncoming = incomingToMe.has(f.id);
+          const isSelf = me != null && f.id === me;
 
-            return (
-              <li
-                key={f.id}
-                style={rowStyle}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(0)'; }}
-              >
-                <Link href={href} style={linkStyle}>
-                  <img
-                    src={f.avatar_url || '/avatar-placeholder.png'}
-                    alt=""
-                    style={{ height: 40, width: 40, borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }}
-                  />
-                  <div style={nameStyle}>{isSelf ? 'You' : (f.display_name || f.id)}</div>
-                </Link>
+          return (
+            <li
+              key={f.id}
+              style={rowStyle}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLLIElement).style.transform = 'translateY(0)'; }}
+            >
+              <Link href={href} style={linkStyle}>
+                <img
+                  src={f.avatar_url || '/avatar-placeholder.png'}
+                  alt=""
+                  style={{ height: 40, width: 40, borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }}
+                />
+                <div style={nameStyle}>{isSelf ? 'You' : (f.display_name || f.id)}</div>
+              </Link>
 
-                {isSelf ? (
-                  <div />  {/* no button for yourself */}
-                ) : !me ? (
-                  <button style={btnDarkGray} disabled aria-label="Sign in to add">Add Friend</button>
-                ) : isAccepted ? (
-                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); unfriend(f.id); }} style={btnGreen} aria-label="Remove friend">Friend</button>
-                ) : isRequestedOut ? (
-                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} style={btnDarkGray} disabled aria-label="Request sent">Requested</button>
-                ) : isIncoming ? (
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); acceptRequest(f.id); }} style={btnGreen} aria-label="Accept">Accept</button>
-                    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); declineRequest(f.id); }} style={btnGray} aria-label="Decline">Decline</button>
-                  </div>
-                ) : (
-                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFriend(f.id); }} style={btnGray} aria-label="Add friend">Add Friend</button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </>
-    );
-  }, [friends, loading, acceptedWithMe, requestedOut, incomingToMe, me]);
-
-  return <div>{friendsSection}</div>;
+              {isSelf ? (
+                <div />  // no button for yourself
+              ) : !me ? (
+                <button style={btnDarkGray} disabled aria-label="Sign in to add">Add Friend</button>
+              ) : isAccepted ? (
+                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); unfriend(f.id); }} style={btnGreen} aria-label="Remove friend">Friend</button>
+              ) : isRequestedOut ? (
+                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); }} style={btnDarkGray} disabled aria-label="Request sent">Requested</button>
+              ) : isIncoming ? (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); acceptRequest(f.id); }} style={btnGreen} aria-label="Accept">Accept</button>
+                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); declineRequest(f.id); }} style={btnGray} aria-label="Decline">Decline</button>
+                </div>
+              ) : (
+                <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); addFriend(f.id); }} style={btnGray} aria-label="Add friend">Add Friend</button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
