@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Image from 'next/image';
+import { supabase } from '@/lib/supabaseClient';
+import { RecipeTile } from '@/components/RecipeBadges';
+import RecipeModal from '@/components/RecipeModal';
 
 type Profile = {
   id: string;
+  handle: string;
   display_name: string | null;
   nickname: string | null;
   bio: string | null;
@@ -14,217 +18,474 @@ type Profile = {
 
 type Recipe = {
   id: string;
+  user_id: string;
   title: string;
   cuisine: string | null;
+  recipe_types: string[] | null;
   photo_url: string | null;
   source_url: string | null;
-  user_id: string;
+  created_at: string | null;
+  visibility?: 'public' | 'friends' | 'private' | null;
 };
 
-export default function PublicCookbookPage() {
+type FriendshipStatus = 'none' | 'pending' | 'accepted' | 'blocked';
+
+export default function OtherUserCookbookByHandlePage() {
   const { handle } = useParams<{ handle: string }>();
   const router = useRouter();
 
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [viewedProfile, setViewedProfile] = useState<Profile | null>(null);
+
+  const [friendshipStatus, setFriendshipStatus] = useState<FriendshipStatus>('none');
+  const [pendingRequesterId, setPendingRequesterId] = useState<string | null>(null); // who initiated pending
+
   const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [friendCount, setFriendCount] = useState<number>(0);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [recipesLoading, setRecipesLoading] = useState<boolean>(true);
+  const [hasMore, setHasMore] = useState<boolean>(true);
+  const [pageCursor, setPageCursor] = useState<string | null>(null);
 
+  const [recipesAddedCount, setRecipesAddedCount] = useState<number>(0);
+  const [recipesCookedCount, setRecipesCookedCount] = useState<number>(0);
+  const [friendsOfViewedUser, setFriendsOfViewedUser] = useState<Profile[]>([]);
+  const [openRecipeId, setOpenRecipeId] = useState<string | null>(null);
+
+  const PAGE_SIZE = 24;
+
+  // --- bootstrap current user ---
   useEffect(() => {
-    let ignore = false;
-    async function load() {
-      setLoading(true);
-      setErr(null);
+    let on = true;
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      if (!on) return;
+      setCurrentUserId(data.user?.id ?? null);
+    })();
+    return () => { on = false; };
+  }, []);
 
-      // 1) Look up the user by their display_name (handle)
-      const { data: prof, error: pErr } = await supabase
+  // --- load viewed profile by handle ---
+  useEffect(() => {
+    if (!handle) return;
+    let on = true;
+    (async () => {
+      const { data, error } = await supabase
         .from('profiles')
-        .select('id, display_name, nickname, bio, avatar_url')
-        .eq('display_name', decodeURIComponent(handle))
-        .single();
+        .select('id, handle, display_name, nickname, bio, avatar_url')
+        .ilike('handle', String(handle)) // case-insensitive; switch to .eq if you enforce lowercasing
+        .maybeSingle();
 
-      if (pErr || !prof) {
-        if (!ignore) {
-          setErr('User not found');
-          setLoading(false);
-        }
+      if (!on) return;
+
+      if (error) {
+        console.error('Load profile error', error);
+        return;
+      }
+      if (!data) {
+        router.push('/404');
+        return;
+      }
+      setViewedProfile(data as Profile);
+    })();
+    return () => { on = false; };
+  }, [handle, router]);
+
+  const viewedUserId = viewedProfile?.id ?? null;
+  const isSelf = currentUserId && viewedUserId && currentUserId === viewedUserId;
+
+  // --- friendship status between current user and viewed user ---
+  useEffect(() => {
+    if (!currentUserId || !viewedUserId || isSelf) {
+      if (isSelf) {
+        setFriendshipStatus('accepted');
+        setPendingRequesterId(null);
+      }
+      return;
+    }
+    let on = true;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from('friendships')
+        .select('requester_id, addressee_id, status')
+        .or(
+          `and(requester_id.eq.${currentUserId},addressee_id.eq.${viewedUserId}),and(requester_id.eq.${viewedUserId},addressee_id.eq.${currentUserId})`
+        )
+        .limit(1);
+
+      if (!on) return;
+
+      if (error) {
+        console.error('Friendship fetch error', error);
+        setFriendshipStatus('none');
+        setPendingRequesterId(null);
         return;
       }
 
-      const target = prof as Profile;
-      if (!ignore) setProfile(target);
+      const row = data?.[0];
+      if (!row) {
+        setFriendshipStatus('none');
+        setPendingRequesterId(null);
+      } else {
+        setFriendshipStatus((row.status as FriendshipStatus) ?? 'none');
+        setPendingRequesterId(row.requester_id ?? null);
+      }
+    })();
 
-      // 2) Friend count (mutuals) for this person
-      const { data: fc } = await supabase.rpc('friend_count', { uid: target.id });
-      if (!ignore && typeof fc === 'number') setFriendCount(fc as number);
+    return () => { on = false; };
+  }, [currentUserId, viewedUserId, isSelf]);
 
-      // 3) Recipes visible to the CURRENT viewer:
-      //    - If viewer is anon: only public recipes (policy allows anon reads for public).
-      //    - If viewer is logged in and is a friend: public + friends.
-      //    - If viewer = owner: public + friends + private.
-      //    Your existing RLS policy enforces all of that automatically.
-      const { data: recs, error: rErr } = await supabase
+  // --- counts (all recipes; cooked optional) ---
+  useEffect(() => {
+    if (!viewedUserId) return;
+    let on = true;
+
+    (async () => {
+      const { count: addedCount, error: countErr } = await supabase
         .from('recipes')
-        .select('id,title,cuisine,photo_url,source_url,user_id')
-        .eq('user_id', target.id)
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', viewedUserId);
+
+      if (on) {
+        if (countErr) console.error('Recipes Added count error', countErr);
+        setRecipesAddedCount(addedCount ?? 0);
+      }
+
+      const { count: cookedCount, error: cookedErr } = await supabase
+        .from('recipe_cooks')
+        .select('*', { count: 'exact', head: true })
+        .eq('cook_user_id', viewedUserId);
+
+      if (on) {
+        if (cookedErr) {
+          console.warn('Recipes Cooked count skipped/failed', cookedErr.message);
+          setRecipesCookedCount(0);
+        } else {
+          setRecipesCookedCount(cookedCount ?? 0);
+        }
+      }
+    })();
+
+    return () => { on = false; };
+  }, [viewedUserId]);
+
+  // --- friends list for the viewed user (accepted only) ---
+  useEffect(() => {
+    if (!viewedUserId) return;
+    let on = true;
+
+    (async () => {
+      const { data: frows, error: ferr } = await supabase
+        .from('friendships')
+        .select('requester_id, addressee_id, status')
+        .eq('status', 'accepted')
+        .or(`requester_id.eq.${viewedUserId},addressee_id.eq.${viewedUserId}`)
+        .limit(200);
+
+      if (!on) return;
+      if (ferr) {
+        console.error('Friends-of-viewed fetch error', ferr);
+        setFriendsOfViewedUser([]);
+        return;
+      }
+
+      const otherIds = (frows ?? []).map((r) =>
+        r.requester_id === viewedUserId ? r.addressee_id : r.requester_id
+      );
+      if (otherIds.length === 0) {
+        setFriendsOfViewedUser([]);
+        return;
+      }
+
+      const { data: profs, error: perr } = await supabase
+        .from('profiles')
+        .select('id, display_name, nickname, avatar_url')
+        .in('id', otherIds.slice(0, 50));
+
+      if (perr) {
+        console.error('Friend profiles fetch error', perr);
+        setFriendsOfViewedUser([]);
+      } else {
+        setFriendsOfViewedUser(profs ?? []);
+      }
+    })();
+
+    return () => { on = false; };
+  }, [viewedUserId]);
+
+  // --- visibility & recipes list (only what *I* can see) ---
+  const isFriends = isSelf || friendshipStatus === 'accepted';
+
+  const loadRecipes = useCallback(
+    async (initial = false) => {
+      if (!viewedUserId) return;
+      setRecipesLoading(true);
+
+      // Base query: recipes by viewed user
+      let query = supabase
+        .from('recipes')
+        .select(
+          'id, user_id, title, cuisine, recipe_types, photo_url, source_url, created_at, visibility',
+          { count: 'exact' }
+        )
+        .eq('user_id', viewedUserId)
         .order('created_at', { ascending: false });
 
-      if (!ignore) {
-        if (rErr) {
-          setErr(rErr.message);
-        } else {
-          setRecipes((recs as Recipe[]) ?? []);
-        }
-        setLoading(false);
+      // Apply visibility filter
+      if (isFriends) {
+        query = query.or('visibility.eq.public,visibility.eq.friends');
+      } else {
+        query = query.eq('visibility', 'public');
       }
+
+      // Simple cursor
+      if (!initial && pageCursor) {
+        query = query.lt('created_at', pageCursor);
+      }
+      query = query.limit(PAGE_SIZE);
+
+      const { data, error } = await query;
+      if (error) {
+        console.error('Recipes fetch error', error);
+        setRecipesLoading(false);
+        return;
+      }
+
+      const rows = data ?? [];
+      setRecipes((prev) => (initial ? rows : [...prev, ...rows]));
+      if (rows.length < PAGE_SIZE) {
+        setHasMore(false);
+      } else {
+        setHasMore(true);
+        setPageCursor(rows[rows.length - 1]?.created_at ?? null);
+      }
+      setRecipesLoading(false);
+    },
+    [PAGE_SIZE, isFriends, pageCursor, viewedUserId]
+  );
+
+  // Reset & initial load when profile or friendship changes
+  useEffect(() => {
+    setRecipes([]);
+    setPageCursor(null);
+    setHasMore(true);
+    if (viewedUserId) {
+      loadRecipes(true);
     }
-    load();
-    return () => { ignore = true; };
-  }, [handle]);
+  }, [viewedUserId, isFriends, loadRecipes]);
 
-  const recipesCount = recipes.length;
+  // --- inline friend button actions ---
+  const canCancelPending =
+    friendshipStatus === 'pending' && pendingRequesterId === currentUserId;
 
-  if (loading) return <div style={{ padding: 16 }}>Loading…</div>;
-  if (err) return <div style={{ padding: 16, color: '#b42318' }}>{err}</div>;
-  if (!profile) return null;
+  const handleAddFriend = useCallback(async () => {
+    if (!currentUserId || !viewedUserId || isSelf) return;
+    const { error } = await supabase.from('friendships').insert([
+      {
+        requester_id: currentUserId,
+        addressee_id: viewedUserId,
+        status: 'pending',
+      },
+    ]);
+    if (error) {
+      console.error('Add friend error', error);
+      return;
+    }
+    setFriendshipStatus('pending');
+    setPendingRequesterId(currentUserId);
+  }, [currentUserId, viewedUserId, isSelf]);
 
-  // --- simple mobile-first styles reused from your main page ---
-  const statWrap: React.CSSProperties = {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(3, 1fr)',
-    gap: 8,
-    marginTop: 12,
-    marginBottom: 16,
-  };
-  const statCard: React.CSSProperties = {
-    background: '#fff',
-    border: '1px solid #eee',
-    borderRadius: 10,
-    padding: 10,
-    textAlign: 'center',
-    userSelect: 'none',
-  };
-  const statNumber: React.CSSProperties = {
-    fontWeight: 800,
-    fontSize: 20,
-    lineHeight: 1.1,
-  };
-  const statLabel: React.CSSProperties = {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  };
+  const handleCancelRequest = useCallback(async () => {
+    if (!currentUserId || !viewedUserId) return;
+    const { error } = await supabase
+      .from('friendships')
+      .delete()
+      .match({ requester_id: currentUserId, addressee_id: viewedUserId, status: 'pending' });
+    if (error) {
+      console.error('Cancel request error', error);
+      return;
+    }
+    setFriendshipStatus('none');
+    setPendingRequesterId(null);
+  }, [currentUserId, viewedUserId]);
+
+  const displayTitle = useMemo(() => {
+    if (!viewedProfile) return 'Profile';
+    return viewedProfile.display_name || viewedProfile.nickname || `@${viewedProfile.handle}`;
+  }, [viewedProfile]);
+
+  // --- stat tile handlers ---
+  const handleClickFriends = useCallback(() => {
+    router.push(`/users/${viewedUserId}/friends`); // adjust if you have a handle-based friends route instead
+  }, [router, viewedUserId]);
+
+  const handleClickRecipesAdded = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const handleClickRecipesCooked = useCallback(() => {
+    router.push(`/users/${viewedUserId}/cooked`);
+  }, [router, viewedUserId]);
 
   return (
-    <div style={{ maxWidth: 1100, margin: '24px auto', padding: 16 }}>
-      {/* Simple header with back */}
-      <header style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-        <button
-          onClick={() => router.back()}
-          aria-label="Go back"
-          style={{ border: '1px solid #eee', borderRadius: 8, padding: '6px 10px', background: '#fff' }}
-        >
-          ← Back
-        </button>
-        <h1 style={{ margin: 0, fontSize: 20 }}>{profile.display_name}</h1>
-      </header>
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      {/* Header */}
+      <div className="flex items-start gap-4">
+        {/* Avatar */}
+        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-full bg-gray-200">
+          {viewedProfile?.avatar_url ? (
+            <Image
+              src={viewedProfile.avatar_url}
+              alt={displayTitle}
+              fill
+              sizes="80px"
+              style={{ objectFit: 'cover' }}
+            />
+          ) : null}
+        </div>
 
-      {/* Public profile block (no box, like yours) */}
-      <section>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '140px 1fr',
-            gap: 12,
-            alignItems: 'start',
-          }}
-        >
-          <img
-            src={profile.avatar_url || '/avatar-placeholder.png'}
-            alt=""
-            style={{
-              width: 120, height: 120, borderRadius: '50%',
-              objectFit: 'cover', border: '1px solid #ddd', background: '#f5f5f5',
-            }}
-          />
-          <div style={{ display: 'grid', gap: 6 }}>
-            <div style={{ fontSize: 18, fontWeight: 800 }}>{profile.display_name}</div>
-            {profile.nickname ? (
-              <div style={{ fontSize: 13, color: '#666' }}>{profile.nickname}</div>
-            ) : null}
-            {profile.bio ? (
-              <div style={{ whiteSpace: 'pre-wrap', color: '#222', marginTop: 4 }}>{profile.bio}</div>
+        {/* Title + Bio */}
+        <div className="flex-1">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h1 className="text-xl font-semibold">{displayTitle}</h1>
+              <p className="text-sm text-gray-600">@{viewedProfile?.handle}</p>
+            </div>
+
+            {/* Inline Friend Button (replaces Edit Profile) */}
+            {viewedUserId && !isSelf ? (
+              friendshipStatus === 'none' ? (
+                <button
+                  onClick={handleAddFriend}
+                  className="rounded-md bg-black px-4 py-2 text-white hover:opacity-90"
+                >
+                  Add Friend
+                </button>
+              ) : friendshipStatus === 'pending' ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    className="rounded-md bg-gray-200 px-4 py-2 text-gray-800 cursor-default"
+                    disabled
+                  >
+                    Requested
+                  </button>
+                  {canCancelPending ? (
+                    <button
+                      onClick={handleCancelRequest}
+                      className="rounded-md border px-3 py-2 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  ) : null}
+                </div>
+              ) : friendshipStatus === 'accepted' ? (
+                <button
+                  className="rounded-md bg-green-600 px-4 py-2 text-white cursor-default"
+                  disabled
+                >
+                  Friend
+                </button>
+              ) : (
+                <button
+                  className="rounded-md bg-gray-300 px-4 py-2 text-white cursor-default"
+                  disabled
+                >
+                  {friendshipStatus}
+                </button>
+              )
             ) : null}
           </div>
-        </div>
-      </section>
 
-      {/* Stats row: Friends / Recipes / Recipes Cooked (placeholder 0) */}
-      <div style={statWrap}>
-        <div style={statCard}>
-          <div style={statNumber}>{friendCount}</div>
-          <div style={statLabel}>Friends</div>
-        </div>
-        <div style={statCard}>
-          <div style={statNumber}>{recipesCount}</div>
-          <div style={statLabel}>Recipes</div>
-        </div>
-        <div style={statCard}>
-          <div style={statNumber}>0</div>
-          <div style={statLabel}>Recipes Cooked</div>
+          {viewedProfile?.bio ? (
+            <p className="mt-2 whitespace-pre-line text-sm text-gray-800">
+              {viewedProfile.bio}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      {/* Recipes grid (RLS already filtered by viewer permissions) */}
-      {recipes.length === 0 ? (
-        <div
-          style={{
-            background: '#fff',
-            border: '1px solid #eee',
-            borderRadius: 12,
-            padding: 16,
-            color: '#606375',
-          }}
+      {/* Stats row: Friends | Recipes Added | Recipes Cooked */}
+      <div className="mt-6 grid grid-cols-3 gap-3">
+        <button
+          onClick={handleClickFriends}
+          className="rounded-lg border bg-white p-3 text-left shadow-sm hover:bg-gray-50"
         >
-          No recipes to show.
-        </div>
-      ) : (
+          <div className="text-xs uppercase text-gray-500">Friends</div>
+          <div className="mt-1 text-2xl font-semibold">
+            {friendsOfViewedUser.length}
+          </div>
+          <div className="mt-1 line-clamp-1 text-xs text-gray-600">
+            {friendsOfViewedUser
+              .map((p) => p.display_name || p.nickname || 'Friend')
+              .slice(0, 3)
+              .join(', ')}
+            {friendsOfViewedUser.length > 3 ? '…' : ''}
+          </div>
+        </button>
+
+        <button
+          onClick={handleClickRecipesAdded}
+          className="rounded-lg border bg-white p-3 text-left shadow-sm hover:bg-gray-50"
+        >
+          <div className="text-xs uppercase text-gray-500">Recipes Added</div>
+          <div className="mt-1 text-2xl font-semibold">{recipesAddedCount}</div>
+          <div className="mt-1 text-xs text-gray-600">All-time</div>
+        </button>
+
+        <button
+          onClick={handleClickRecipesCooked}
+          className="rounded-lg border bg-white p-3 text-left shadow-sm hover:bg-gray-50"
+        >
+          <div className="text-xs uppercase text-gray-500">Recipes Cooked</div>
+          <div className="mt-1 text-2xl font-semibold">{recipesCookedCount}</div>
+          <div className="mt-1 text-xs text-gray-600">All-time</div>
+        </button>
+      </div>
+
+      {/* Recipes grid */}
+      <div className="mt-6">
+        {recipes.length === 0 && !recipesLoading ? (
+          <div className="rounded-md border bg-white p-6 text-center text-gray-600">
+            No visible recipes yet.
+          </div>
+        ) : null}
+
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))',
-            gap: 12,
+            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+            gap: 8,
           }}
         >
           {recipes.map((r) => (
-            <a
+            <RecipeTile
               key={r.id}
-              href={r.source_url || '#'}
-              target={r.source_url ? '_blank' : undefined}
-              rel={r.source_url ? 'noreferrer' : undefined}
-              style={{
-                border: '1px solid #eee',
-                borderRadius: 12,
-                padding: 10,
-                background: '#fff',
-                textDecoration: 'none',
-                color: 'inherit',
-              }}
-            >
-              {r.photo_url ? (
-                <img
-                  src={r.photo_url}
-                  alt={r.title}
-                  style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', borderRadius: 8 }}
-                />
-              ) : null}
-              <div style={{ fontWeight: 600, marginTop: 6, fontSize: 14 }}>{r.title}</div>
-              <div style={{ color: '#666', fontSize: 12 }}>{r.cuisine || '—'}</div>
-            </a>
+              id={r.id}
+              title={r.title}
+              imgUrl={r.photo_url || undefined}
+              aspect="1/1"
+              onClick={() => setOpenRecipeId(r.id)}
+            />
           ))}
         </div>
-      )}
+
+        {/* Load more */}
+        {hasMore ? (
+          <div className="mt-6 flex justify-center">
+            <button
+              className="rounded-md bg-black px-4 py-2 text-white hover:opacity-90 disabled:opacity-50"
+              onClick={() => loadRecipes(false)}
+              disabled={recipesLoading}
+            >
+              {recipesLoading ? 'Loading…' : 'Load more'}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Modal */}
+      {openRecipeId ? (
+        <RecipeModal recipeId={openRecipeId} onClose={() => setOpenRecipeId(null)} />
+      ) : null}
     </div>
   );
 }
