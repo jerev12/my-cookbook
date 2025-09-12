@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { supabase } from '@/lib/supabaseClient';
 
-// NOTE: adjust these imports if your alias/paths differ.
 // From app/u/[handle]/ to app/components
 import { RecipeTile } from '../../components/RecipeBadges';
 import RecipeModal from '../../components/RecipeModal';
@@ -481,7 +480,7 @@ export default function OtherUserCookbookByHandlePage() {
           {recipes.map((r) => (
             <RecipeTile
               key={r.id}
-              id={r.id}
+              /* id prop removed per Option 1 */
               title={r.title}
               imgUrl={r.photo_url || undefined}
               aspect="1/1"
