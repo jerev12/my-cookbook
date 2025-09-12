@@ -445,7 +445,7 @@ export default function FriendsList({ userId }: Props) {
     justifyContent: 'space-between',
     width: '100%',
     maxWidth: '100%',
-    borderBottom: '1px solid '#eee",
+    borderBottom: '1px solid #eee",
     padding: '12px 8px',
     background: '#fff',
     boxSizing: 'border-box',
