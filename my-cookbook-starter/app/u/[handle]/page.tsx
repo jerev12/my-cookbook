@@ -489,7 +489,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           <div
             style={{
               background: '#fff',
-              border: '1px solid '#eee',
+              border: '1px solid #eee',
               borderRadius: 12,
               padding: 16,
               color: '#606375',
