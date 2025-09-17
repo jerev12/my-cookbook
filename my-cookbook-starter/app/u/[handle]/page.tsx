@@ -17,7 +17,7 @@ type Recipe = {
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
-  recipe_visibility: RecipeVisibility; // <- we keep this name in TS
+  recipe_visibility: RecipeVisibility;
 };
 
 type Profile = {
@@ -28,8 +28,8 @@ type Profile = {
   bio?: string | null;
 };
 
-// Match My Cookbook’s avatar size used in ProfileSection
-const AVATAR_SIZE = 64;
+// Match MyCookbook's new avatar size
+const AVATAR_SIZE = 100;
 
 export default function OtherCookbookPage({ params }: { params: { handle: string } }) {
   const handleParam = decodeURIComponent(params.handle || '').trim();
@@ -49,9 +49,10 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   // Stats
   const [friendCount, setFriendCount] = useState(0);
   const [totalAddedCount, setTotalAddedCount] = useState(0);
-  const [recipesCookedCount] = useState(0); // placeholder
+  const [recipesCookedCount] = useState(0);
 
-  // Recipes (already visibility-filtered by server)
+  // Recipes
+  const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
   const [visibleRecipes, setVisibleRecipes] = useState<Recipe[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState(true);
 
@@ -62,7 +63,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
 
   const gridRef = useRef<HTMLDivElement | null>(null);
 
-  // --- Auth (watch session)
+  // --- Auth
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -121,18 +122,16 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     return () => { cancelled = true; };
   }, [handleParam]);
 
-  // --- Load stats, friendship, and recipes (server-side visibility)
+  // --- Load stats, friendship, and all recipes
   useEffect(() => {
     let cancelled = false;
     if (!viewed) return;
     const viewedId = viewed.id;
 
     async function loadAll() {
-      // friend count
       const { data: fc, error: fcErr } = await supabase.rpc('friend_count', { uid: viewedId });
       if (!cancelled) setFriendCount(!fcErr && typeof fc === 'number' ? (fc as number) : 0);
 
-      // total recipes they’ve added (count only; not filtered)
       const { count, error: cntErr } = await supabase
         .from('recipes')
         .select('id', { count: 'exact', head: true })
@@ -169,39 +168,46 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         if (!cancelled) { setIsFriend(false); setRequestedOut(false); setIncomingReq(false); }
       }
 
-      // recipes — use `visibility` in DB, alias to recipe_visibility in TS
+      // all recipes (filter client-side)
       setLoadingRecipes(true);
-      try {
-        const qb = supabase
-          .from('recipes')
-          .select(
-            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,recipe_visibility:visibility'
-          )
-          .eq('user_id', viewedId)
-          .order('created_at', { ascending: false });
+      const { data: rows2, error: recErr } = await supabase
+        .from('recipes')
+        .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,recipe_visibility')
+        .eq('user_id', viewedId)
+        .order('created_at', { ascending: false });
 
-        if (viewerId === viewedId) {
-          // owner sees everything: no extra filter
-        } else if (isFriend) {
-          qb.neq('visibility', 'private');     // public + friends
+      if (!cancelled) {
+        if (recErr) {
+          console.error(recErr);
+          setAllRecipes([]);
         } else {
-          qb.eq('visibility', 'public');       // public only
+          setAllRecipes((rows2 as Recipe[]) ?? []);
         }
-
-        const { data, error } = await qb;
-        if (error) throw error;
-
-        if (!cancelled) setVisibleRecipes((data as Recipe[]) ?? []);
-      } catch (e) {
-        console.error('recipes fetch failed', e);
-        if (!cancelled) setVisibleRecipes([]);
-      } finally {
-        if (!cancelled) setLoadingRecipes(false);
+        setLoadingRecipes(false);
       }
     }
 
     loadAll();
-  }, [viewed, viewerId, isFriend]);
+  }, [viewed, viewerId]);
+
+  // --- Client-side visibility filter
+  useEffect(() => {
+    if (!viewed) { setVisibleRecipes([]); return; }
+    const viewedId = viewed.id;
+    const canSeeFriends = !!viewerId && (viewerId === viewedId || isFriend);
+
+    const filtered = allRecipes.filter((r) => {
+      const v = (r.recipe_visibility || 'public') as RecipeVisibility;
+      if (v === 'private') {
+        // self-only; change to viewerId === viewedId if you ever want self to see private here
+        return false;
+      }
+      if (v === 'friends') return canSeeFriends;
+      return true; // public or null
+    });
+
+    setVisibleRecipes(filtered);
+  }, [allRecipes, viewerId, viewed, isFriend]);
 
   // --- Friend actions
   async function onAddFriend() {
@@ -264,7 +270,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   function closeRecipe() { setOpen(false); setSelected(null); }
   function scrollToGrid() { gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 
-  // --- styles (match My Cookbook)
+  // --- styles (match My Cookbook stat row)
   const statWrap: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
@@ -292,7 +298,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     marginTop: 2,
   };
 
-  // Header with Back button ONLY (no page title)
+  // Header with Back button ONLY
   const Header = useMemo(
     () => (
       <header
@@ -322,7 +328,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     []
   );
 
-  // Profile strip: avatar + name + bio, THEN full-width friend button below
+  // Profile strip: grid w/ 110px column (like ProfileSection) + full-width friend button below
   function ProfileBlock() {
     if (!viewed) return null;
     const name = viewed.display_name || viewed.nickname || 'User';
@@ -420,19 +426,31 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
 
     return (
       <section style={{ marginBottom: 8 }}>
-        {/* Row: avatar + text (NO box) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <img
-            src={viewed.avatar_url || '/avatar-placeholder.png'}
-            alt={name}
-            style={{
-              width: AVATAR_SIZE,
-              height: AVATAR_SIZE,
-              borderRadius: '50%',
-              objectFit: 'cover',
-              border: '1px solid #ddd',
-            }}
-          />
+        {/* Grid matches ProfileSection: avatar 100px, first col ~110px */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '110px 1fr',
+            gap: 12,
+            alignItems: 'start',
+            marginBottom: 8,
+          }}
+        >
+          <div>
+            <img
+              src={viewed.avatar_url || '/avatar-placeholder.png'}
+              alt={name}
+              style={{
+                width: AVATAR_SIZE,
+                height: AVATAR_SIZE,
+                borderRadius: '50%',
+                objectFit: 'cover',
+                border: '1px solid #ddd',
+                background: '#f5f5f5',
+              }}
+            />
+          </div>
+
           <div style={{ display: 'grid' }}>
             <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{name}</div>
             {viewed.bio ? (
