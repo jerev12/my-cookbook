@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { supabase } from '@/lib/supabaseClient';
 import RecipeModal from '../components/RecipeModal';
 import { RecipeTile } from '../components/RecipeBadges';
@@ -458,66 +459,80 @@ export default function FriendsFeed() {
         )}
 
         <div>
-          {rows.map((r) => (
-            <article key={r.id} style={articleStyle}>
-              {/* compact avatar row */}
-              <div style={headerRowStyle}>
-                <Avatar
-                  src={r._profile?.avatar_url ?? null}
-                  name={r._profile?.display_name ?? 'User'}
-                  size={44}
-                />
-                <span style={boldNameStyle} title={r._profile?.display_name ?? 'Unknown User'}>
-                  {r._profile?.display_name ?? 'Unknown User'}
-                </span>
-              </div>
+          {rows.map((r) => {
+            const profile = r._profile;
+            const handle =
+              (profile?.display_name && encodeURIComponent(profile.display_name)) ||
+              profile?.id ||
+              null;
 
-              {/* image tile */}
-              <div style={{ paddingLeft: 0, paddingRight: 0 }}>
-                <RecipeTile
-                  title={r.title}
-                  types={r.recipe_types ?? []}
-                  photoUrl={r.photo_url}
-                  onClick={() => openRecipe(r)}
-                  ariaLabel={`Open ${r.title}`}
-                />
-              </div>
-
-              {/* actions: Added on ... (left) + heart/bookmark (right) */}
-              <div style={actionsRowStyle}>
-                <span style={{ color: '#6b7280' }}>
-                  Added on {r.created_at ? formatDate(r.created_at) : '—'}
-                </span>
-
-                <div style={actionsRightStyle}>
-                  <button
-                    type="button"
-                    onClick={() => toggleHeart(r)}
-                    aria-label={r._heartedByMe ? 'Remove heart' : 'Add heart'}
-                    style={iconBtnStyle}
-                    title={r._heartedByMe ? 'Unheart' : 'Heart'}
-                  >
-                    <HeartIcon filled={!!r._heartedByMe} />
-                    <span>{r._heartCount ?? 0}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => toggleBookmark(r)}
-                    aria-label={r._bookmarkedByMe ? 'Remove bookmark' : 'Add bookmark'}
-                    style={{
-                      ...iconBtnStyle,
-                      ...(r.user_id !== userId ? iconMuted : undefined),
-                    }}
-                    title={r._bookmarkedByMe ? 'Remove bookmark' : 'Bookmark'}
-                  >
-                    <BookmarkIcon filled={!!r._bookmarkedByMe} />
-                    {r.user_id === userId ? <span>{r._bookmarkCount ?? 0}</span> : null}
-                  </button>
+            return (
+              <article key={r.id} style={articleStyle}>
+                {/* compact avatar row */}
+                <div style={headerRowStyle}>
+                  <Avatar
+                    src={profile?.avatar_url ?? null}
+                    name={profile?.display_name ?? 'User'}
+                    size={44}
+                  />
+                  {handle ? (
+                    <Link href={`/u/${handle}`} style={boldNameStyle} title={profile?.display_name ?? 'Unknown User'}>
+                      {profile?.display_name ?? 'Unknown User'}
+                    </Link>
+                  ) : (
+                    <span style={boldNameStyle} title={profile?.display_name ?? 'Unknown User'}>
+                      {profile?.display_name ?? 'Unknown User'}
+                    </span>
+                  )}
                 </div>
-              </div>
-            </article>
-          ))}
+
+                {/* image tile */}
+                <div style={{ paddingLeft: 0, paddingRight: 0 }}>
+                  <RecipeTile
+                    title={r.title}
+                    types={r.recipe_types ?? []}
+                    photoUrl={r.photo_url}
+                    onClick={() => openRecipe(r)}
+                    ariaLabel={`Open ${r.title}`}
+                  />
+                </div>
+
+                {/* actions: Added on ... (left) + heart/bookmark (right) */}
+                <div style={actionsRowStyle}>
+                  <span style={{ color: '#6b7280' }}>
+                    Added on {r.created_at ? formatDate(r.created_at) : '—'}
+                  </span>
+
+                  <div style={actionsRightStyle}>
+                    <button
+                      type="button"
+                      onClick={() => toggleHeart(r)}
+                      aria-label={r._heartedByMe ? 'Remove heart' : 'Add heart'}
+                      style={iconBtnStyle}
+                      title={r._heartedByMe ? 'Unheart' : 'Heart'}
+                    >
+                      <HeartIcon filled={!!r._heartedByMe} />
+                      <span>{r._heartCount ?? 0}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleBookmark(r)}
+                      aria-label={r._bookmarkedByMe ? 'Remove bookmark' : 'Add bookmark'}
+                      style={{
+                        ...iconBtnStyle,
+                        ...(r.user_id !== userId ? iconMuted : undefined),
+                      }}
+                      title={r._bookmarkedByMe ? 'Remove bookmark' : 'Bookmark'}
+                    >
+                      <BookmarkIcon filled={!!r._bookmarkedByMe} />
+                      {r.user_id === userId ? <span>{r._bookmarkCount ?? 0}</span> : null}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
 
           {loading && rows.length === 0 && (
             <div style={{ padding: 16 }}>
