@@ -67,7 +67,7 @@ export default function ProfileSection() {
             src={profile.avatar_url || '/avatar-placeholder.png'}
             alt="avatar"
             style={{
-              width: 140, height: 140, borderRadius: '50%',
+              width: 100, height: 100, borderRadius: '50%',
               objectFit: 'cover', border: '1px solid #ddd', background: '#f5f5f5',
             }}
           />
