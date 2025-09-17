@@ -202,7 +202,7 @@ export default function CommunitySearch() {
         [targetId]: relation === 'none' ? 'pending_outgoing' : 'none',
       }));
 
-    if (relation === 'none') {
+      if (relation === 'none') {
         const { error } = await supabase.rpc('request_friend', { target_id: targetId });
         if (error) throw error;
       } else if (relation === 'pending_outgoing') {
@@ -443,9 +443,13 @@ export default function CommunitySearch() {
                     }
                   }
 
+                  // ***** change: build /u/[handle] where handle = display_name (encoded) or id *****
+                  const handle =
+                    (p.display_name && encodeURIComponent(p.display_name)) || p.id;
+
                   return (
                     <div key={p.id} style={S.userRow}>
-                      <Link href={`/profiles/${p.id}`} style={S.userLeftLink}>
+                      <Link href={`/u/${handle}`} style={S.userLeftLink}>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={p.avatar_url ?? '/avatar-placeholder.png'}
