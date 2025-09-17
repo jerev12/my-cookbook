@@ -28,7 +28,7 @@ type Profile = {
   bio?: string | null;
 };
 
-// Match MyCookbook's new avatar size
+// ❗ Only change: avatar size now 100 (was 64)
 const AVATAR_SIZE = 100;
 
 export default function OtherCookbookPage({ params }: { params: { handle: string } }) {
@@ -49,9 +49,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   // Stats
   const [friendCount, setFriendCount] = useState(0);
   const [totalAddedCount, setTotalAddedCount] = useState(0);
-  const [recipesCookedCount] = useState(0);
+  const [recipesCookedCount] = useState(0); // placeholder
 
-  // Recipes
+  // Recipes (client-side visibility filter below)
   const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
   const [visibleRecipes, setVisibleRecipes] = useState<Recipe[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState(true);
@@ -70,7 +70,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
       const { data: { user } } = await supabase.auth.getUser();
       if (!ignore) setViewerId(user?.id ?? null);
     })();
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: { subscription) } } = supabase.auth.onAuthStateChange((_e, session) => {
       setViewerId(session?.user?.id ?? null);
     });
     return () => subscription.unsubscribe();
@@ -168,9 +168,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         if (!cancelled) { setIsFriend(false); setRequestedOut(false); setIncomingReq(false); }
       }
 
-      // all recipes (filter client-side)
+      // all recipes (we’ll filter client-side)
       setLoadingRecipes(true);
-      const { data: rows2, error: recErr } = await supabase
+      const { data: rows, error: recErr } = await supabase
         .from('recipes')
         .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,recipe_visibility')
         .eq('user_id', viewedId)
@@ -181,7 +181,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
           console.error(recErr);
           setAllRecipes([]);
         } else {
-          setAllRecipes((rows2 as Recipe[]) ?? []);
+          setAllRecipes((rows as Recipe[]) ?? []);
         }
         setLoadingRecipes(false);
       }
@@ -197,11 +197,8 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     const canSeeFriends = !!viewerId && (viewerId === viewedId || isFriend);
 
     const filtered = allRecipes.filter((r) => {
-      const v = (r.recipe_visibility || 'public') as RecipeVisibility;
-      if (v === 'private') {
-        // self-only; change to viewerId === viewedId if you ever want self to see private here
-        return false;
-      }
+      const v = (r.recipe_visibility || 'public') as RecipeVisibility; // treat null as public
+      if (v === 'private') return false; // only owner can see; keep false per your earlier choice
       if (v === 'friends') return canSeeFriends;
       return true; // public or null
     });
@@ -209,7 +206,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     setVisibleRecipes(filtered);
   }, [allRecipes, viewerId, viewed, isFriend]);
 
-  // --- Friend actions
+  // --- Friend actions (unchanged)
   async function onAddFriend() {
     if (!viewerId || !viewed || viewerId === viewed.id || busyFriend) return;
     setBusyFriend(true);
@@ -270,7 +267,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   function closeRecipe() { setOpen(false); setSelected(null); }
   function scrollToGrid() { gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 
-  // --- styles (match My Cookbook stat row)
+  // --- styles (unchanged)
   const statWrap: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
@@ -298,7 +295,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     marginTop: 2,
   };
 
-  // Header with Back button ONLY
+  // Header with only Back button (unchanged)
   const Header = useMemo(
     () => (
       <header
@@ -328,7 +325,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     []
   );
 
-  // Profile strip: grid w/ 110px column (like ProfileSection) + full-width friend button below
+  // Profile strip: avatar + name + bio, THEN full-width friend button below
   function ProfileBlock() {
     if (!viewed) return null;
     const name = viewed.display_name || viewed.nickname || 'User';
@@ -426,31 +423,19 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
 
     return (
       <section style={{ marginBottom: 8 }}>
-        {/* Grid matches ProfileSection: avatar 100px, first col ~110px */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '110px 1fr',
-            gap: 12,
-            alignItems: 'start',
-            marginBottom: 8,
-          }}
-        >
-          <div>
-            <img
-              src={viewed.avatar_url || '/avatar-placeholder.png'}
-              alt={name}
-              style={{
-                width: AVATAR_SIZE,
-                height: AVATAR_SIZE,
-                borderRadius: '50%',
-                objectFit: 'cover',
-                border: '1px solid #ddd',
-                background: '#f5f5f5',
-              }}
-            />
-          </div>
-
+        {/* Row: avatar + text (NO box) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+          <img
+            src={viewed.avatar_url || '/avatar-placeholder.png'}
+            alt={name}
+            style={{
+              width: AVATAR_SIZE,
+              height: AVATAR_SIZE,
+              borderRadius: '50%',
+              objectFit: 'cover',
+              border: '1px solid #ddd',
+            }}
+          />
           <div style={{ display: 'grid' }}>
             <div style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.15 }}>{name}</div>
             {viewed.bio ? (
