@@ -313,6 +313,9 @@ export default function RecipeModal({
 
   if (!open || !recipe) return null;
   const authorName = author?.display_name || author?.nickname || 'Unknown user';
+  // 👇 build /u/[handle] from display_name (preferred) or id
+  const authorHandle =
+    (author?.display_name && encodeURIComponent(author.display_name)) || author?.id || '';
 
   return (
     <div
@@ -354,7 +357,7 @@ export default function RecipeModal({
             }}
           >
             <a
-              href={`/profile/${author?.id ?? ''}`}
+              href={`/u/${authorHandle}`}  // ⭐ changed to /u/[handle]
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
