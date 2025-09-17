@@ -389,6 +389,9 @@ export default function FriendsFeed() {
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    color: 'inherit',       // keep original color
+    textDecoration: 'none', // no underline
+    cursor: 'pointer',      // still shows it's clickable
   };
   // space-between: "Added on ..." left, buttons right
   const actionsRowStyle: React.CSSProperties = {
@@ -468,21 +471,33 @@ export default function FriendsFeed() {
 
             return (
               <article key={r.id} style={articleStyle}>
-                {/* compact avatar row */}
+                {/* compact avatar row (avatar + name both clickable, but name looks like plain text) */}
                 <div style={headerRowStyle}>
-                  <Avatar
-                    src={profile?.avatar_url ?? null}
-                    name={profile?.display_name ?? 'User'}
-                    size={44}
-                  />
                   {handle ? (
-                    <Link href={`/u/${handle}`} style={boldNameStyle} title={profile?.display_name ?? 'Unknown User'}>
-                      {profile?.display_name ?? 'Unknown User'}
+                    <Link
+                      href={`/u/${handle}`}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'inherit', textDecoration: 'none' }}
+                    >
+                      <Avatar
+                        src={profile?.avatar_url ?? null}
+                        name={profile?.display_name ?? 'User'}
+                        size={44}
+                      />
+                      <span style={boldNameStyle} title={profile?.display_name ?? 'Unknown User'}>
+                        {profile?.display_name ?? 'Unknown User'}
+                      </span>
                     </Link>
                   ) : (
-                    <span style={boldNameStyle} title={profile?.display_name ?? 'Unknown User'}>
-                      {profile?.display_name ?? 'Unknown User'}
-                    </span>
+                    <>
+                      <Avatar
+                        src={profile?.avatar_url ?? null}
+                        name={profile?.display_name ?? 'User'}
+                        size={44}
+                      />
+                      <span style={boldNameStyle} title={profile?.display_name ?? 'Unknown User'}>
+                        {profile?.display_name ?? 'Unknown User'}
+                      </span>
+                    </>
                   )}
                 </div>
 
@@ -648,9 +663,9 @@ function Avatar({
 
 // ===== TOGGLES with optimistic update + EMIT events for cross-sync =====
 async function toggleHeart(r: Recipe, userId?: string | null) {
-  // no-op placeholder for TS; real handler is bound inline below
+  // no-op placeholder for TS; real handler is bound inline in your app elsewhere
 }
 
 async function toggleBookmark(r: Recipe, userId?: string | null) {
-  // no-op placeholder for TS; real handler is bound inline below
+  // no-op placeholder for TS; real handler is bound inline in your app elsewhere
 }
