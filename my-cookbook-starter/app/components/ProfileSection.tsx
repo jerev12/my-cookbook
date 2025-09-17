@@ -8,7 +8,7 @@ type Profile = {
   id: string;
   email?: string | null;
   display_name: string | null;
-  nickname: string | null;   // NEW
+  nickname: string | null;
   bio: string | null;
   avatar_url: string | null;
 };
@@ -26,7 +26,7 @@ export default function ProfileSection() {
 
       const { data: p } = await supabase
         .from('profiles')
-        .select('id, email, display_name, nickname, bio, avatar_url') // include nickname
+        .select('id, email, display_name, nickname, bio, avatar_url')
         .eq('id', user.id)
         .single();
 
@@ -52,44 +52,42 @@ export default function ProfileSection() {
 
   return (
     <section>
-      {/* Read-only layout: smaller avatar on the left, text on the right */}
+      {/* Layout: avatar left, text right */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '160px 1fr', // smaller so text never gets pushed off on mobile
+          gridTemplateColumns: '110px 1fr', // tuned for 100px avatar + ~10px breathing room
           gap: 12,
           alignItems: 'start',
         }}
       >
-        {/* Avatar (smaller) */}
+        {/* Avatar */}
         <div>
           <img
             src={profile.avatar_url || '/avatar-placeholder.png'}
             alt="avatar"
             style={{
-              width: 100, height: 100, borderRadius: '50%',
-              objectFit: 'cover', border: '1px solid #ddd', background: '#f5f5f5',
+              width: 100,
+              height: 100,
+              borderRadius: '50%',
+              objectFit: 'cover',
+              border: '1px solid #ddd',
+              background: '#f5f5f5',
             }}
           />
         </div>
 
-        {/* Text details (no headers) */}
+        {/* Text details */}
         <div style={{ display: 'grid', gap: 6 }}>
-          {/* Display name: bigger & bold, no label */}
           <div style={{ fontSize: 18, fontWeight: 800 }}>
             {profile.display_name || '—'}
           </div>
-
-          {/* Nickname: small, muted (optional line only if present) */}
           <div style={{ fontSize: 13, color: '#666' }}>
             {profile.nickname || ' '}
           </div>
-
-          {/* Bio: plain paragraph, no header */}
           <div style={{ whiteSpace: 'pre-wrap', color: '#222', marginTop: 4 }}>
             {profile.bio || ''}
           </div>
-
           <div style={{ marginTop: 8 }}>
             <button
               onClick={() => setOpenEdit(true)}
