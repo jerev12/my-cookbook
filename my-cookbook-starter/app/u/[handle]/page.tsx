@@ -17,12 +17,7 @@ type Recipe = {
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
-
-  // Support BOTH schemas:
-  // - some code uses "visibility"
-  // - other code used "recipe_visibility"
-  visibility?: string | null;
-  recipe_visibility?: RecipeVisibility;
+  recipe_visibility: RecipeVisibility;
 };
 
 type Profile = {
@@ -33,7 +28,6 @@ type Profile = {
   bio?: string | null;
 };
 
-// Match ProfileSection on My Cookbook (64px)
 const AVATAR_SIZE = 64;
 
 export default function OtherCookbookPage({ params }: { params: { handle: string } }) {
@@ -54,10 +48,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   // Stats
   const [friendCount, setFriendCount] = useState(0);
   const [totalAddedCount, setTotalAddedCount] = useState(0);
-  const [recipesCookedCount] = useState(0); // placeholder
+  const [recipesCookedCount] = useState(0);
 
-  // Recipes
-  const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
+  // Recipes (NOW fetched with server-side visibility in the query)
   const [visibleRecipes, setVisibleRecipes] = useState<Recipe[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState(true);
 
@@ -127,18 +120,16 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     return () => { cancelled = true; };
   }, [handleParam]);
 
-  // --- Load stats, friendship, and all recipes
+  // --- Load stats + friendship
   useEffect(() => {
     let cancelled = false;
     if (!viewed) return;
     const viewedId = viewed.id;
 
-    async function loadAll() {
-      // Friend count via RPC
+    (async () => {
       const { data: fc, error: fcErr } = await supabase.rpc('friend_count', { uid: viewedId });
       if (!cancelled) setFriendCount(!fcErr && typeof fc === 'number' ? (fc as number) : 0);
 
-      // Total recipes user has added (full count, regardless of visibility to me)
       const { count, error: cntErr } = await supabase
         .from('recipes')
         .select('id', { count: 'exact', head: true })
@@ -174,56 +165,52 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
       } else {
         if (!cancelled) { setIsFriend(false); setRequestedOut(false); setIncomingReq(false); }
       }
+    })();
 
-      // --- Recipes: select BOTH visibility fields and normalize later
+    return () => { cancelled = true; };
+  }, [viewed, viewerId]);
+
+  // --- Load recipes with server-side visibility filtering (Option A)
+  useEffect(() => {
+    let cancelled = false;
+    async function loadVisibleRecipes() {
+      if (!viewed) return;
+      const viewedId = viewed.id;
+
       setLoadingRecipes(true);
-      const { data: recRows, error: recErr } = await supabase
-        .from('recipes')
-        .select(
-          'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility,recipe_visibility'
-        )
-        .eq('user_id', viewedId)
-        .order('created_at', { ascending: false });
+      try {
+        const qb = supabase
+          .from('recipes')
+          .select(
+            'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,recipe_visibility'
+          )
+          .eq('user_id', viewedId)
+          .order('created_at', { ascending: false });
 
-      if (!cancelled) {
-        if (recErr) {
-          console.error(recErr);
-          setAllRecipes([]);
+        if (viewerId === viewedId) {
+          // Owner — no extra filter; see everything.
+        } else if (isFriend) {
+          // Friend — anything except private.
+          qb.neq('recipe_visibility', 'private');
         } else {
-          setAllRecipes((recRows as Recipe[]) ?? []);
+          // Stranger — public only.
+          qb.eq('recipe_visibility', 'public');
         }
-        setLoadingRecipes(false);
+
+        const { data, error } = await qb;
+        if (error) throw error;
+        if (!cancelled) setVisibleRecipes((data as Recipe[]) ?? []);
+      } catch (e) {
+        if (!cancelled) setVisibleRecipes([]);
+      } finally {
+        if (!cancelled) setLoadingRecipes(false);
       }
     }
 
-    loadAll();
-  }, [viewed, viewerId]);
-
-  // --- Normalize visibility and filter on the client
-  useEffect(() => {
-    if (!viewed) { setVisibleRecipes([]); return; }
-
-    const viewedId = viewed.id;
-    const amSelf = viewerId === viewedId;
-    const canSeeFriends = amSelf || isFriend;
-
-    const filtered = allRecipes.filter((r) => {
-      // normalize: prefer "visibility"; fallback to "recipe_visibility"; default to 'public'
-      const v = (r.visibility ?? r.recipe_visibility ?? 'public') as RecipeVisibility;
-
-      if (v === 'private') {
-        // show private only to self
-        return amSelf;
-      }
-      if (v === 'friends') {
-        return canSeeFriends;
-      }
-      // public
-      return true;
-    });
-
-    setVisibleRecipes(filtered);
-  }, [allRecipes, viewerId, viewed, isFriend]);
+    // run whenever we know enough to decide the filter
+    loadVisibleRecipes();
+    return () => { cancelled = true; };
+  }, [viewed, viewerId, isFriend]);
 
   // --- Friend actions
   async function onAddFriend() {
@@ -303,18 +290,9 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     cursor: 'pointer',
     userSelect: 'none',
   };
-  const statNumber: React.CSSProperties = {
-    fontWeight: 800,
-    fontSize: 20,
-    lineHeight: 1.1,
-  };
-  const statLabel: React.CSSProperties = {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  };
+  const statNumber: React.CSSProperties = { fontWeight: 800, fontSize: 20, lineHeight: 1.1 };
+  const statLabel: React.CSSProperties = { fontSize: 12, color: '#666', marginTop: 2 };
 
-  // Header with Back button ONLY
   const Header = useMemo(
     () => (
       <header
@@ -344,7 +322,6 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     []
   );
 
-  // Profile strip: avatar + name + bio, THEN full-width friend button below
   function ProfileBlock() {
     if (!viewed) return null;
     const name = viewed.display_name || viewed.nickname || 'User';
@@ -442,7 +419,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
 
     return (
       <section style={{ marginBottom: 8 }}>
-        {/* Row: avatar + text (NO box) */}
+        {/* Avatar + text (no box) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
           <img
             src={viewed.avatar_url || '/avatar-placeholder.png'}
