@@ -70,7 +70,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
       const { data: { user } } = await supabase.auth.getUser();
       if (!ignore) setViewerId(user?.id ?? null);
     })();
-    const { data: { subscription) } } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       setViewerId(session?.user?.id ?? null);
     });
     return () => subscription.unsubscribe();
