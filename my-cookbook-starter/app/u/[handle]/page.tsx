@@ -17,7 +17,12 @@ type Recipe = {
   photo_url: string | null;
   source_url: string | null;
   created_at: string | null;
-  recipe_visibility: RecipeVisibility;
+
+  // Support BOTH schemas:
+  // - some code uses "visibility"
+  // - other code used "recipe_visibility"
+  visibility?: string | null;
+  recipe_visibility?: RecipeVisibility;
 };
 
 type Profile = {
@@ -28,7 +33,7 @@ type Profile = {
   bio?: string | null;
 };
 
-// Match My Cookbook avatar size (update this one number if your ProfileSection uses a different size)
+// Match ProfileSection on My Cookbook (64px)
 const AVATAR_SIZE = 64;
 
 export default function OtherCookbookPage({ params }: { params: { handle: string } }) {
@@ -52,6 +57,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   const [recipesCookedCount] = useState(0); // placeholder
 
   // Recipes
+  const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
   const [visibleRecipes, setVisibleRecipes] = useState<Recipe[]>([]);
   const [loadingRecipes, setLoadingRecipes] = useState(true);
 
@@ -89,7 +95,6 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
         .limit(1);
 
       if (cancelled) return;
-
       if (nameErr) {
         setLoadErr(nameErr.message);
         setViewed(null);
@@ -122,38 +127,25 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     return () => { cancelled = true; };
   }, [handleParam]);
 
-  // --- Load stats, friendship (via RPC), and recipes with server-side visibility filter
+  // --- Load stats, friendship, and all recipes
   useEffect(() => {
     let cancelled = false;
     if (!viewed) return;
-
     const viewedId = viewed.id;
 
     async function loadAll() {
-      // friend count
+      // Friend count via RPC
       const { data: fc, error: fcErr } = await supabase.rpc('friend_count', { uid: viewedId });
       if (!cancelled) setFriendCount(!fcErr && typeof fc === 'number' ? (fc as number) : 0);
 
-      // total added (count for that user, regardless of visibility)
+      // Total recipes user has added (full count, regardless of visibility to me)
       const { count, error: cntErr } = await supabase
         .from('recipes')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', viewedId);
       if (!cancelled) setTotalAddedCount(!cntErr && typeof count === 'number' ? count : 0);
 
-      // Determine if the viewer is a friend of the viewed user (RLS-safe via RPC)
-      let friendFlag = false;
-      if (viewerId && viewerId !== viewedId) {
-        const { data: friendsList, error: frErr } = await supabase
-          .rpc('friends_of_user', { target_user: viewedId });
-        if (!frErr && Array.isArray(friendsList)) {
-          const ids = friendsList.map((p: any) => String(p.id));
-          friendFlag = ids.includes(viewerId);
-        }
-      }
-      if (!cancelled) setIsFriend(friendFlag);
-
-      // Also compute pending/request states (direct table read; OK if your friendships RLS allows it)
+      // friendship
       if (viewerId && viewerId !== viewedId) {
         const { data: rows, error } = await supabase
           .from('friendships')
@@ -165,73 +157,73 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
 
         if (!cancelled) {
           if (error || !rows?.length) {
-            setRequestedOut(false); setIncomingReq(false);
+            setIsFriend(false); setRequestedOut(false); setIncomingReq(false);
           } else {
             const r = rows[0] as { requester_id: string; addressee_id: string; status: string };
-            if (r.status === 'pending') {
+            if (r.status === 'accepted') {
+              setIsFriend(true); setRequestedOut(false); setIncomingReq(false);
+            } else if (r.status === 'pending') {
+              setIsFriend(false);
               setRequestedOut(r.requester_id === viewerId);
               setIncomingReq(r.addressee_id === viewerId);
             } else {
-              setRequestedOut(false); setIncomingReq(false);
+              setIsFriend(false); setRequestedOut(false); setIncomingReq(false);
             }
           }
         }
       } else {
-        if (!cancelled) { setRequestedOut(false); setIncomingReq(false); }
+        if (!cancelled) { setIsFriend(false); setRequestedOut(false); setIncomingReq(false); }
       }
 
-      // === Recipe visibility (server-side) ===
-      // We fetch public (and NULL) recipes always.
-      // If friendFlag, we ALSO fetch 'friends' recipes and merge.
+      // --- Recipes: select BOTH visibility fields and normalize later
       setLoadingRecipes(true);
-
-      // 1) public or NULL
-      const pubQuery = supabase
+      const { data: recRows, error: recErr } = await supabase
         .from('recipes')
-        .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,recipe_visibility')
+        .select(
+          'id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,visibility,recipe_visibility'
+        )
         .eq('user_id', viewedId)
-        .or('recipe_visibility.is.null,recipe_visibility.eq.public')
         .order('created_at', { ascending: false });
 
-      // 2) friends-only (only if friends)
-      const friendsQuery = friendFlag
-        ? supabase
-            .from('recipes')
-            .select('id,user_id,title,cuisine,recipe_types,photo_url,source_url,created_at,recipe_visibility')
-            .eq('user_id', viewedId)
-            .eq('recipe_visibility', 'friends')
-            .order('created_at', { ascending: false })
-        : null;
-
-      let merged: Recipe[] = [];
-      const [{ data: pubRows, error: pubErr }, friendsRes] = await Promise.all([
-        pubQuery,
-        friendsQuery ? friendsQuery : Promise.resolve({ data: [], error: null }),
-      ]);
-
-      if (pubErr) {
-        console.error(pubErr);
-      }
-      if (friendsRes && (friendsRes as any).error) {
-        console.error((friendsRes as any).error);
-      }
-
-      const pub = ((pubRows as Recipe[]) ?? []);
-      const fri = (friendsRes && (friendsRes as any).data ? ((friendsRes as any).data as Recipe[]) : []);
-      // Merge unique by id, keep order by created_at (pub already sorted desc; we’ll just place friends before and then dedupe)
-      const byId = new Map<string, Recipe>();
-      [...fri, ...pub].forEach(r => { if (!byId.has(r.id)) byId.set(r.id, r); });
-      merged = Array.from(byId.values());
-
       if (!cancelled) {
-        setVisibleRecipes(merged);
+        if (recErr) {
+          console.error(recErr);
+          setAllRecipes([]);
+        } else {
+          setAllRecipes((recRows as Recipe[]) ?? []);
+        }
         setLoadingRecipes(false);
       }
     }
 
     loadAll();
-    return () => { cancelled = true; };
   }, [viewed, viewerId]);
+
+  // --- Normalize visibility and filter on the client
+  useEffect(() => {
+    if (!viewed) { setVisibleRecipes([]); return; }
+
+    const viewedId = viewed.id;
+    const amSelf = viewerId === viewedId;
+    const canSeeFriends = amSelf || isFriend;
+
+    const filtered = allRecipes.filter((r) => {
+      // normalize: prefer "visibility"; fallback to "recipe_visibility"; default to 'public'
+      const v = (r.visibility ?? r.recipe_visibility ?? 'public') as RecipeVisibility;
+
+      if (v === 'private') {
+        // show private only to self
+        return amSelf;
+      }
+      if (v === 'friends') {
+        return canSeeFriends;
+      }
+      // public
+      return true;
+    });
+
+    setVisibleRecipes(filtered);
+  }, [allRecipes, viewerId, viewed, isFriend]);
 
   // --- Friend actions
   async function onAddFriend() {
@@ -294,7 +286,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
   function closeRecipe() { setOpen(false); setSelected(null); }
   function scrollToGrid() { gridRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 
-  // --- styles (My Cookbook vibe)
+  // --- styles
   const statWrap: React.CSSProperties = {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
@@ -322,7 +314,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
     marginTop: 2,
   };
 
-  // Header: Back button only
+  // Header with Back button ONLY
   const Header = useMemo(
     () => (
       <header
@@ -528,10 +520,7 @@ export default function OtherCookbookPage({ params }: { params: { handle: string
                 title={r.title}
                 types={r.recipe_types ?? []}
                 photoUrl={r.photo_url}
-                onClick={() => {
-                  setSelected(r);
-                  setOpen(true);
-                }}
+                onClick={() => openRecipe(r)}
               />
             ))}
           </div>
